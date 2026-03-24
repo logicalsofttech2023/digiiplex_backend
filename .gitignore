@@ -1,1 +1,10 @@
-/node_modules
+/gateway/node_modules
+/digiplex_gateway/node_modules
+/services/adminService/node_modules
+/services/authService/node_modules
+/services/streamingService/node_modules
+/services/subscriptionService/node_modules
+/services/uploadService/node_modules
+/services/userService/node_modules
+/services/videoService/node_modules
+

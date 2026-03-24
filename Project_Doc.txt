@@ -1,0 +1,15 @@
+Admin panel => 1. onboard cretor genrate email, pass
+Creator panel => login in dashbaord after email verification 
+
+upload moviews => select category , select gener, add meta data , select file
+then click upload 
+
+file upload to hatzner cloud 
+
+master admin panel => view list pending movies
+aprove movie => start encoding (ffmpeg) => upload hatzner cloud
+
+reject movie list => movie reject with reason 
+
+folder structure => 1. CreatorName => CategoryName => ganer => original => movie1
+                                                               processe => movie1 => 1080p => encoding files 

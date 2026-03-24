@@ -2,14 +2,18 @@ import express from "express";
 
 const app = express();
 
-app.get("/health", (req, res) => {
-  res.json({ status: "User Service Running ✅" });
+const userService = {
+  getUsers: (req, res) => {
+    res.json({ users: [] });
+  }
+};
+
+app.get("/", (req, res) => {
+  res.json({ service: "User Service running" });
 });
 
-app.get("/profile-test", (req, res) => {
-  res.json({ message: "Profile API Working 👤" });
-});
+app.get("/users", userService.getUsers);
 
-app.listen(4002, () => {
-  console.log("User Service on 4002");
+app.listen(3002, () => {
+  console.log("User Service running on 3002");
 });

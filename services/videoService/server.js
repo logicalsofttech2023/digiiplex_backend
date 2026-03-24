@@ -2,14 +2,18 @@ import express from "express";
 
 const app = express();
 
-app.get("/health", (req, res) => {
-  res.json({ status: "Video Service Running ✅" });
+const videoService = {
+  list: (req, res) => {
+    res.json({ videos: [] });
+  }
+};
+
+app.get("/", (req, res) => {
+  res.json({ service: "Video Service running" });
 });
 
-app.get("/videos-test", (req, res) => {
-  res.json({ message: "Video API Working 🎬" });
-});
+app.get("/videos", videoService.list);
 
-app.listen(4003, () => {
-  console.log("Video Service on 4003");
+app.listen(3004, () => {
+  console.log("Video Service running on 3004");
 });
