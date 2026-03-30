@@ -1,15 +1,22 @@
 import express from "express";
+import "dotenv/config";
 import { PORT } from "./constants/constant.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
-import connectDB from "./config/db.js";
+import { connectPostgresDB } from "./config/db.js";
+import uploadRoutes from "./routes/uploadRoutes.js";
+import cors from 'cors';
+import { setBucketCors } from "./config/s3.js";
 const app = express();
 app.use(express.json());
-connectDB();
-app.get("/", (req, res) => {
-    res.json({ service: "Admin Service running" });
+app.use(cors());
+connectPostgresDB();
+setBucketCors();
+app.get("/test", (req, res) => {
+    res.json({ service: "upload Service running" });
 });
+app.use("/upload", uploadRoutes);
 app.use(errorMiddleware);
 app.listen(PORT, () => {
-    console.log(`Admin Service running on ${PORT}`);
+    console.log(`upload Service running on ${PORT}`);
 });
 //# sourceMappingURL=index.js.map

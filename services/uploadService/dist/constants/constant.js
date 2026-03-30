@@ -1,6 +1,12 @@
 import { config } from "dotenv";
 config();
-export const PORT = process.env.PORT || 3000;
+const requiredEnv = (value, key) => {
+    if (!value) {
+        throw new Error(`Missing env variable: ${key}`);
+    }
+    return value;
+};
+export const PORT = process.env.PORT || 3006;
 export const NODE_ENV = process.env.NODE_ENV || "development";
 export const JWT_SECRET = process.env.JWT_SECRET || "secret";
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1d";
@@ -30,8 +36,23 @@ export const MESSAGES = {
         NOT_FOUND: "Admin not found",
         ALREADY_EXISTS: "Admin already exists",
     },
+    CREATOR: {
+        CREATED: "Creator created successfully",
+        UPDATED: "Creator updated successfully",
+        DELETED: "Creator deleted successfully",
+        LOGIN_SUCCESS: "Login successful",
+        NOT_FOUND: "Creator not found",
+        ALREADY_EXISTS: "Creator already exists",
+    },
 };
 export const MongoDB_URL = {
-    URL: process.env.MONGO_URI || "",
+    URL: requiredEnv(process.env.MONGO_URI, "MONGO_URI"),
+};
+export const S3_CREDENTIAL = {
+    S3_ENDPOINT: requiredEnv(process.env.S3_ENDPOINT, "S3_ENDPOINT"),
+    S3_REGION: requiredEnv(process.env.S3_REGION, "S3_REGION"),
+    S3_ACCESS_KEY: requiredEnv(process.env.S3_ACCESS_KEY, "S3_ACCESS_KEY"),
+    S3_SECRET_KEY: requiredEnv(process.env.S3_SECRET_KEY, "S3_SECRET_KEY"),
+    S3_BUCKET: requiredEnv(process.env.S3_BUCKET, "S3_BUCKET"),
 };
 //# sourceMappingURL=constant.js.map

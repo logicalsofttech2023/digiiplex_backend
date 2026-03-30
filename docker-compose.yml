@@ -1,0 +1,56 @@
+services:
+  redis:
+    image: redis:7
+    container_name: redis_cache
+    restart: always
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: digiiplex
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  upload-service:
+    build:
+      context: ./services/uploadService
+      dockerfile: Dockerfile
+    container_name: upload_service
+    restart: always
+    ports:
+      - "3006:3006"
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./services/uploadService/.env
+
+  video-worker:
+    build:
+      context: ./services/uploadService
+      dockerfile: Dockerfile
+    container_name: video_worker
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+    command: node dist/workers/videoWorker.js
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./services/uploadService/.env
+
+volumes:
+  postgres_data:

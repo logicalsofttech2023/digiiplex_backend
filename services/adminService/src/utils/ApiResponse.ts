@@ -1,13 +1,13 @@
 class ApiResponse<T = unknown> {
   statusCode: number;
   message: string;
-  data: T;
+  data?: T;
   status: boolean;
 
   constructor(
     statusCode: number,
     message: string,
-    data: T
+    data?: T
   ) {
     this.statusCode = statusCode;
     this.message = message;

@@ -8,3 +8,5 @@
 /services/userService/node_modules
 /services/videoService/node_modules
 
+
+/generated/prisma

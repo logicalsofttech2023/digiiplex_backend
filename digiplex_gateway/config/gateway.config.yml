@@ -1,18 +1,22 @@
 http:
   port: 8080
+
 admin:
   port: 9876
   host: localhost
+
 apiEndpoints:
-  users:
-    paths: '/users/*'
   admin:
     paths: '/admin/*'
+  upload:
+    paths: '/upload/*'
+
 serviceEndpoints:
-  userService:
-    url: 'http://127.0.0.1:3001'
   adminService:
     url: 'http://127.0.0.1:3007'
+  uploadService:
+    url: 'http://127.0.0.1:3006'
+
 policies:
   - basic-auth
   - cors
@@ -22,21 +26,32 @@ policies:
   - oauth2
   - proxy
   - rate-limit
+
 pipelines:
-  default:
-    apiEndpoints:
-      - users
-    policies:
-      - proxy:
-          - action:
-              serviceEndpoint: userService 
-              changeOrigin: true
-  
   adminPipeline:
     apiEndpoints:
       - admin
     policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
       - proxy:
           - action:
-              serviceEndpoint: adminService 
+              serviceEndpoint: adminService
+              changeOrigin: true
+
+  uploadPipeline:
+    apiEndpoints:
+      - upload
+    policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
+      - proxy:
+          - action:
+              serviceEndpoint: uploadService
               changeOrigin: true
