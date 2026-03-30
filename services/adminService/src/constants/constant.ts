@@ -65,4 +65,7 @@ export const S3_CREDENTIAL = {
   S3_BUCKET: requiredEnv(process.env.S3_BUCKET, "S3_BUCKET"),
 };
 
+export const FRONTEND_URL = requiredEnv(process.env.FRONTEND_URL, "FRONTEND_URL");
+
+
 

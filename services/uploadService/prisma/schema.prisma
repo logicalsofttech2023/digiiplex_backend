@@ -7,6 +7,52 @@ datasource db {
   provider = "postgresql"
 }
 
+model Admin {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("admin")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Creator {
+  id                       String   @id @default(uuid())
+  name                     String
+  email                    String   @unique
+  password                 String
+  role                     String?  @default("creator")
+
+  emailVerified            Boolean  @default(false)
+  emailVerificationToken   String?
+  emailVerificationExpires DateTime?
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model Genre {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  image     String
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Language {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  image     String
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 enum MovieStatus { 
   PENDING 
   APPROVED 

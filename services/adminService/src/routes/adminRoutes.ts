@@ -9,23 +9,37 @@ router.post("/create", adminController.createAdmin);
 router.post("/login", adminController.loginAdmin);
 
 
-// Genre routes
-router.post("/createGenre/:folder", upload.single("image"), adminController.createGenre);
-router.patch("/updateGenre/:folder", upload.single("image"), adminController.updateGenre);
-router.delete("/deleteGenre/:folder", adminController.deleteGenre);
+router.post("/createGenre",upload("genre").single("image"), adminController.createGenre);
+
 router.get("/getAllGenres", adminController.getAllGenres);
+router.patch(
+  "/updateGenre/:id",
+  upload("genre").single("image"),
+  adminController.updateGenre
+);
 
+router.delete(
+  "/deleteGenre/:id",
+  adminController.deleteGenre
+);
 
-// Genre routes
-router.post("/createLanguage/:folder", upload.single("image"), adminController.createLanguage);
-router.patch("/updateLanguage/:folder", upload.single("image"), adminController.updateLanguage);
-router.delete("/deleteLanguage/:folder", adminController.deleteLanguage);
+router.post("/createLanguage", upload("language").single("image"), adminController.createLanguage);
 router.get("/getAllLanguages", adminController.getAllLanguages);
+router.patch(
+  "/updateLanguage/:id",
+  upload("language").single("image"),
+  adminController.updateLanguage
+);
 
+router.delete(
+  "/deleteLanguage/:id",
+  adminController.deleteLanguage
+);
 
-// Creator routes
 router.get("/getAllCreator", adminController.getAllCreator);
 router.post("/creator/create", adminController.createCreator);
+router.put("/creator/update/:id", adminController.updateCreator);
+router.delete("/creator/delete/:id", adminController.deleteCreator);
 router.post("/creator/login", adminController.loginCreator);
 router.get("/creator/verifyEmail", adminController.verifyEmail);
 
