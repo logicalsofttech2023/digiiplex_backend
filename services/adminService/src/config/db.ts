@@ -2,7 +2,7 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import { MongoDB_URL } from "../constants/constant.js";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../generated/prisma/client.js";
+import { PrismaClient } from "@prisma/client";
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error("DATABASE_URL is not defined in environment variables.");

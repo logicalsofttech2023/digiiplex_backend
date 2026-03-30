@@ -13,6 +13,7 @@ import { prisma } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { HTTP_STATUS, S3_CREDENTIAL } from "../constants/constant.js";
 import { videoQueue } from "../config/queue.js";
+import type { Video } from "../generated/prisma/client.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -465,11 +466,11 @@ export const getMovieById = asyncHandler(
 
     // 🎯 Separate videos & trailers
     const movieVideos = movie.videos.filter(
-      (v) => v.type === "MOVIE"
+      (v: Video) => v.type === "MOVIE"
     );
 
     const trailers = movie.videos.filter(
-      (v) => v.type === "TRAILER"
+      (v: Video) => v.type === "TRAILER"
     );
 
     const response = {
@@ -553,11 +554,11 @@ export const getMovieBySlug = asyncHandler(
 
     // 🎯 Separate movie & trailer videos
     const movieVideos = movie.videos.filter(
-      (v) => v.type === "MOVIE"
+      (v: Video) => v.type === "MOVIE"
     );
 
     const trailers = movie.videos.filter(
-      (v) => v.type === "TRAILER"
+      (v: Video) => v.type === "TRAILER"
     );
 
     // 🎯 Clean response (remove raw videos array)
