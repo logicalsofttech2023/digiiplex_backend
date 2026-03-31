@@ -10,12 +10,32 @@ apiEndpoints:
     paths: '/admin/*'
   upload:
     paths: '/upload/*'
+  auth:
+    paths: '/auth/*'
+  user:
+    paths: '/user/*'
+  subscription:
+    paths: '/subscription/*'
+  video:
+    paths: '/video/*'
+  streaming:
+    paths: '/streaming/*'
 
 serviceEndpoints:
   adminService:
-    url: 'http://127.0.0.1:3007'
+    url: 'http://admin-service:3007'
   uploadService:
-    url: 'http://127.0.0.1:3006'
+    url: 'http://upload-service:3006'
+  authService:
+    url: 'http://auth-service:3001'
+  userService:
+    url: 'http://user-service:3002'
+  subscriptionService:
+    url: 'http://subscription-service:3003'
+  videoService:
+    url: 'http://video-service:3004'
+  streamingService:
+    url: 'http://streaming-service:3005'
 
 policies:
   - basic-auth
@@ -55,3 +75,78 @@ pipelines:
           - action:
               serviceEndpoint: uploadService
               changeOrigin: true
+
+  authPipeline:
+    apiEndpoints:
+      - auth
+    policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
+      - proxy:
+          - action:
+              serviceEndpoint: authService
+              changeOrigin: true
+              stripPath: true
+
+  userPipeline:
+    apiEndpoints:
+      - user
+    policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
+      - proxy:
+          - action:
+              serviceEndpoint: userService
+              changeOrigin: true
+              stripPath: true
+
+  subscriptionPipeline:
+    apiEndpoints:
+      - subscription
+    policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
+      - proxy:
+          - action:
+              serviceEndpoint: subscriptionService
+              changeOrigin: true
+              stripPath: true
+
+  videoPipeline:
+    apiEndpoints:
+      - video
+    policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
+      - proxy:
+          - action:
+              serviceEndpoint: videoService
+              changeOrigin: true
+              stripPath: true
+
+  streamingPipeline:
+    apiEndpoints:
+      - streaming
+    policies:
+      - cors:
+          - action:
+              origin: "*"
+              methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
+              allowedHeaders: "Content-Type, Authorization"
+      - proxy:
+          - action:
+              serviceEndpoint: streamingService
+              changeOrigin: true
+              stripPath: true

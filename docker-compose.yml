@@ -146,6 +146,10 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      admin-service:
+        condition: service_started
+      upload-service:
+        condition: service_started
       auth-service:
         condition: service_started
       user-service:
