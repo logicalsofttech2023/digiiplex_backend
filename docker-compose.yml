@@ -18,6 +18,144 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d digiiplex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  admin-service:
+    build:
+      context: ./services/adminService
+      dockerfile: Dockerfile
+    container_name: admin_service
+    restart: always
+    ports:
+      - "3007:3007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      PORT: 3007
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./services/adminService/.env
+
+  auth-service:
+    build:
+      context: ./services/authService
+      dockerfile: Dockerfile
+    container_name: auth_service
+    restart: always
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      PORT: 3001
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./services/authService/.env
+
+  user-service:
+    build:
+      context: ./services/userService
+      dockerfile: Dockerfile
+    container_name: user_service
+    restart: always
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      PORT: 3002
+      REDIS_URL: redis://redis:6379
+
+  subscription-service:
+    build:
+      context: ./services/subscriptionService
+      dockerfile: Dockerfile
+    container_name: subscription_service
+    restart: always
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      PORT: 3003
+      REDIS_URL: redis://redis:6379
+
+  video-service:
+    build:
+      context: ./services/videoService
+      dockerfile: Dockerfile
+    container_name: video_service
+    restart: always
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      PORT: 3004
+      REDIS_URL: redis://redis:6379
+
+  streaming-service:
+    build:
+      context: ./services/streamingService
+      dockerfile: Dockerfile
+    container_name: streaming_service
+    restart: always
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      PORT: 3005
+      REDIS_URL: redis://redis:6379
+
+  digiplex-gateway:
+    build:
+      context: ./digiplex_gateway
+      dockerfile: Dockerfile
+    container_name: digiplex_gateway
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      subscription-service:
+        condition: service_started
+      video-service:
+        condition: service_started
+      streaming-service:
+        condition: service_started
 
   upload-service:
     build:
@@ -28,8 +166,10 @@ services:
     ports:
       - "3006:3006"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       REDIS_URL: redis://redis:6379
@@ -43,8 +183,10 @@ services:
     container_name: video_worker
     restart: always
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     command: node dist/workers/videoWorker.js
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex

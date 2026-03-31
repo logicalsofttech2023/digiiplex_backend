@@ -1,10 +1,8 @@
 import { Worker } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import nodemailer from "nodemailer";
 
-const connection = new IORedis({
-  host: "127.0.0.1",
-  port: 6379,
+const connection = new Redis(process.env.REDIS_URL || "redis://redis:6379", {
   maxRetriesPerRequest: null,
 });
 
@@ -13,8 +11,8 @@ console.log("🚀 Worker started...");
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "luckydawar99@gmail.com",
-    pass: "zbwt caqo bkqz rrsw",
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
 });
 
@@ -32,7 +30,7 @@ const worker = new Worker(
 
     try {
       const info = await transporter.sendMail({
-        from: "luckydawar99@gmail.com",
+        from: process.env.SMTP_USER,
         to,
         subject,
         html,

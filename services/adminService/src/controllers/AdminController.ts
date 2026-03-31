@@ -18,6 +18,8 @@ import {
 } from "../utils/encryption.js";
 import { deleteFromS3 } from "../utils/s3Delete.js";
 import { prisma } from "../config/db.js"; 
+import { FRONTEND_URL } from "../constants/constant.js";
+import { sendEmail } from "../config/sendEmail.js";
 
 
 export const createAdmin = asyncHandler(

@@ -1,9 +1,7 @@
 import { Queue } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 
-const connection = new IORedis({
-  host: "127.0.0.1",
-  port: 6379,
+const connection = new Redis(process.env.REDIS_URL || "redis://redis:6379", {
   maxRetriesPerRequest: null,
 });
 

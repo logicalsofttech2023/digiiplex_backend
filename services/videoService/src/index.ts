@@ -6,24 +6,23 @@ import { prisma } from "./config/db.js";
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3004;
 
 app.use(express.json());
 
-app.get('/', (req: Request, res: Response) => {
-  res.json({ service: "Auth Service running" });
+app.get("/", (_req: Request, res: Response) => {
+  res.json({ service: "Video Service running" });
 });
 
-app.get("/getCount", (req: Request, res: Response) => {
-  res.json({ count: 0 });
+app.get("/videos", (_req: Request, res: Response) => {
+  res.json({ videos: [] });
 });
 
 app.get("/health", async (_req: Request, res: Response) => {
   await prisma.$queryRaw`SELECT 1`;
-  res.json({ ok: true, service: "auth-service" });
+  res.json({ ok: true, service: "video-service" });
 });
 
-
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Video Service running on ${PORT}`);
 });
