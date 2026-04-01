@@ -1,12 +1,22 @@
-## Prisma migration workflow
+## Drizzle workflow
 
-- `adminService` is the single source of truth for Prisma schema and migrations.
-- Run schema changes and migrations only from `services/adminService`.
-- Other services like `uploadService` should only regenerate their Prisma client from the admin schema with `npm run prisma:generate`.
-- `services/uploadService` does not maintain its own Prisma schema anymore.
+- Prisma has been removed from the services layer.
+- Every service now owns its own `src/db/schema.ts` and `drizzle.config.ts`.
+- Database access should use Drizzle ORM with the local service schema.
+- There is no centralized Prisma migration service anymore.
+- Docker services start independently after Postgres/Redis are healthy.
+
+### Service files
+
+- `services/adminService/src/db/schema.ts`
+- `services/authService/src/db/schema.ts`
+- `services/userService/src/db/schema.ts`
+- `services/subscriptionService/src/db/schema.ts`
+- `services/videoService/src/db/schema.ts`
+- `services/streamingService/src/db/schema.ts`
+- `services/uploadService/src/db/schema.ts`
 
 ### Commands
 
-- Admin migrate locally: `cd services/adminService && npm run prisma:migrate`
-- Admin deploy migrations: `cd services/adminService && npm run prisma:deploy`
-- Regenerate upload service client after schema changes: `cd services/uploadService && npm run prisma:generate`
+- Generate Drizzle migrations for any service: `cd services/<serviceName> && npm run db:generate`
+- Run Drizzle migrations for any service: `cd services/<serviceName> && npm run db:migrate`

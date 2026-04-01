@@ -1,19 +1,16 @@
 import { Worker } from "bullmq";
-import { DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import ffmpeg from "fluent-ffmpeg";
 import fs from "fs";
 import path from "path";
 import axios from "axios";
+import { eq } from "drizzle-orm";
 import { connection } from "../config/queue.js";
-import { prisma } from "../config/db.js";
+import { db } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { S3_CREDENTIAL } from "../constants/constant.js";
-import {
-  buildProcessingAssetPrefix,
-  buildS3FileUrl,
-} from "../utils/storagePath.js";
-
-// ffmpeg.setFfmpegPath(ffmpegPath as unknown as string);
+import { buildProcessingAssetPrefix, buildS3FileUrl } from "../utils/storagePath.js";
+import { movies, videoQualities, videos } from "../db/schema.js";
 
 const renditions = [
   {
@@ -140,12 +137,10 @@ const worker = new Worker(
   "video-processing",
   async (job) => {
     const { videoUrl, movieId, sourceKey, assetType } = job.data;
-
     const tempDir = path.join("tmp", movieId, assetType);
     const inputPath = path.join(tempDir, "input.mp4");
     ensureDir(tempDir);
 
-    // Helper to update progress with detailed info
     const updateProgress = async (
       stage: string,
       percent: number,
@@ -155,7 +150,6 @@ const worker = new Worker(
     };
 
     try {
-      // Stage: downloading (0–5%)
       await updateProgress("downloading", 0, {
         message: "Downloading video...",
       });
@@ -172,22 +166,22 @@ const worker = new Worker(
         writer.on("error", reject);
       });
 
-      await updateProgress("downloading", 5, { message: "Download complete" });
+      await updateProgress("downloading", 5, {
+        message: "Download complete",
+      });
 
-      // Stage: transcoding (5–85%)
-      // Each rendition = ~20% of total progress
       const totalRenditions = renditions.length;
       const transcodeStart = 5;
       const transcodeEnd = 85;
       const perRendition = (transcodeEnd - transcodeStart) / totalRenditions;
 
-      for (let i = 0; i < totalRenditions; i++) {
-        const rendition = renditions[i];
-        const startPercent = Math.round(transcodeStart + i * perRendition);
+      for (let index = 0; index < totalRenditions; index += 1) {
+        const rendition = renditions[index];
+        const startPercent = Math.round(transcodeStart + index * perRendition);
 
         await updateProgress("transcoding", startPercent, {
           currentRendition: rendition.label,
-          renditionsDone: i,
+          renditionsDone: index,
           totalRenditions,
           message: `Transcoding ${rendition.label}...`,
         });
@@ -198,39 +192,39 @@ const worker = new Worker(
           rendition,
         );
 
-        const donePercent = Math.round(transcodeStart + (i + 1) * perRendition);
+        const donePercent = Math.round(
+          transcodeStart + (index + 1) * perRendition,
+        );
         await updateProgress("transcoding", donePercent, {
           currentRendition: rendition.label,
-          renditionsDone: i + 1,
+          renditionsDone: index + 1,
           totalRenditions,
           message: `${rendition.label} complete`,
         });
       }
 
-      // Master playlist
       const masterPlaylistPath = path.join(tempDir, "master.m3u8");
       const masterPlaylist = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
-        ...renditions.flatMap((r) => [
-          `#EXT-X-STREAM-INF:BANDWIDTH=${r.bandwidth},RESOLUTION=${r.width}x${r.height}`,
-          `${r.label}/index.m3u8`,
+        ...renditions.flatMap((rendition) => [
+          `#EXT-X-STREAM-INF:BANDWIDTH=${rendition.bandwidth},RESOLUTION=${rendition.width}x${rendition.height}`,
+          `${rendition.label}/index.m3u8`,
         ]),
         "",
       ].join("\n");
       fs.writeFileSync(masterPlaylistPath, masterPlaylist);
 
-      // Stage: uploading (85–98%)
       const files = collectFiles(tempDir);
       const uploadableFiles = files.filter(
-        (f) => f.endsWith(".ts") || f.endsWith(".m3u8"),
+        (file) => file.endsWith(".ts") || file.endsWith(".m3u8"),
       );
       const processingPrefix = buildProcessingAssetPrefix(sourceKey, assetType);
       const totalFiles = uploadableFiles.length;
       let playlistUrl = "";
 
-      for (let i = 0; i < totalFiles; i++) {
-        const file = uploadableFiles[i];
+      for (let index = 0; index < totalFiles; index += 1) {
+        const file = uploadableFiles[index];
         const fileBuffer = fs.readFileSync(file);
         const relativePath = path.relative(tempDir, file).replace(/\\/g, "/");
         const key = `${processingPrefix}/${relativePath}`;
@@ -246,13 +240,15 @@ const worker = new Worker(
           }),
         );
 
-        if (relativePath === "master.m3u8") playlistUrl = buildS3FileUrl(key);
+        if (relativePath === "master.m3u8") {
+          playlistUrl = buildS3FileUrl(key);
+        }
 
-        const uploadPercent = Math.round(85 + ((i + 1) / totalFiles) * 13); // 85–98%
+        const uploadPercent = Math.round(85 + ((index + 1) / totalFiles) * 13);
         await updateProgress("uploading", uploadPercent, {
-          uploadedFiles: i + 1,
+          uploadedFiles: index + 1,
           totalFiles,
-          message: `Uploading files (${i + 1}/${totalFiles})...`,
+          message: `Uploading files (${index + 1}/${totalFiles})...`,
         });
       }
 
@@ -260,33 +256,36 @@ const worker = new Worker(
         message: "Updating database...",
       });
 
-      await prisma.movie.update({
-        where: { id: movieId },
-        data:
-          assetType === "video"
+      await db
+        .update(movies)
+        .set({
+          ...(assetType === "video"
             ? { videoUrl: playlistUrl }
-            : { trailerUrl: playlistUrl },
-      });
+            : { trailerUrl: playlistUrl }),
+          updatedAt: new Date(),
+        })
+        .where(eq(movies.id, movieId));
 
-      const video = await prisma.video.create({
-        data: {
+      const [video] = await db
+        .insert(videos)
+        .values({
           movieId,
           type: assetType === "video" ? "MOVIE" : "TRAILER",
           masterUrl: playlistUrl,
           format: "HLS",
-        },
-      });
+        })
+        .returning();
 
       const baseUrl = playlistUrl.replace("master.m3u8", "");
 
-      await prisma.videoQuality.createMany({
-        data: renditions.map((r) => ({
+      await db.insert(videoQualities).values(
+        renditions.map((rendition) => ({
           videoId: video.id,
-          quality: r.label,
-          url: `${baseUrl}${r.label}/index.m3u8`,
-          bitrate: r.bandwidth,
+          quality: rendition.label,
+          url: `${baseUrl}${rendition.label}/index.m3u8`,
+          bitrate: rendition.bandwidth,
         })),
-      });
+      );
 
       await updateProgress("completed", 100, {
         message: "Processing complete!",

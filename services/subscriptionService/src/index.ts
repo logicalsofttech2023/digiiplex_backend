@@ -1,7 +1,8 @@
 import express from "express";
 import type { Request, Response } from "express";
 import dotenv from "dotenv";
-import { prisma } from "./config/db.js";
+import { sql } from "drizzle-orm";
+import { db } from "./config/db.js";
 
 dotenv.config();
 
@@ -19,7 +20,7 @@ app.get("/plans", (_req: Request, res: Response) => {
 });
 
 app.get("/health", async (_req: Request, res: Response) => {
-  await prisma.$queryRaw`SELECT 1`;
+  await db.execute(sql`SELECT 1`);
   res.json({ ok: true, service: "subscription-service" });
 });
 

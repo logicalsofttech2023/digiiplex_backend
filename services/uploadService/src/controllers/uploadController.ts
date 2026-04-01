@@ -9,137 +9,222 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { prisma } from "../config/db.js";
+import { asc, desc, eq, inArray } from "drizzle-orm";
+import { db } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { HTTP_STATUS, S3_CREDENTIAL } from "../constants/constant.js";
 import { videoQueue } from "../config/queue.js";
-import type { Video } from "../generated/prisma/client.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { buildS3FileUrl, extractKeyFromUrl } from "../utils/storagePath.js";
-import { Queue, Job } from "bullmq";
+import { casts, movieStatusEnum, movies, videoQualities, videos } from "../db/schema.js";
 
-export const createMovieUpload = asyncHandler(
-  async (req: Request, res: Response) => {
-    const {
-      title,
-      shortDescription,
-      description,
-      slug,
-      genres,
-      language,
-      releaseYear,
-      ageRating,
-      duration,
-      rating,
-      cast,
-    } = req.body;
+type MovieRow = typeof movies.$inferSelect;
+type VideoRow = typeof videos.$inferSelect;
+type CastRow = typeof casts.$inferSelect;
+type VideoQualityRow = typeof videoQualities.$inferSelect;
 
-    if (
-      !title ||
-      !description ||
-      !slug ||
-      !genres ||
-      !language ||
-      !releaseYear ||
-      !duration ||
-      !shortDescription ||
-      !ageRating ||
-      !rating
-    ) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "All required fields must be provided",
-      );
+const getMovieAggregate = async (
+  where: { id?: string; slug?: string },
+  qualityOrder: "createdAt" | "quality" = "createdAt",
+) => {
+  const movie = where.id
+    ? await db.query.movies.findFirst({ where: eq(movies.id, where.id) })
+    : await db.query.movies.findFirst({ where: eq(movies.slug, where.slug ?? "") });
+
+  if (!movie) {
+    return null;
+  }
+
+  const [castRows, videoRows] = await Promise.all([
+    db
+      .select({ id: casts.id, name: casts.name, movieId: casts.movieId })
+      .from(casts)
+      .where(eq(casts.movieId, movie.id))
+      .orderBy(asc(casts.name)),
+    db
+      .select()
+      .from(videos)
+      .where(eq(videos.movieId, movie.id))
+      .orderBy(asc(videos.createdAt)),
+  ]);
+
+  const qualityRows = videoRows.length
+    ? await db
+        .select()
+        .from(videoQualities)
+        .where(inArray(videoQualities.videoId, videoRows.map((video) => video.id)))
+        .orderBy(
+          qualityOrder === "quality"
+            ? asc(videoQualities.quality)
+            : asc(videoQualities.createdAt),
+        )
+    : [];
+
+  const qualityMap = new Map<string, VideoQualityRow[]>();
+  for (const quality of qualityRows) {
+    const current = qualityMap.get(quality.videoId) ?? [];
+    current.push(quality);
+    qualityMap.set(quality.videoId, current);
+  }
+
+  const hydratedVideos = videoRows.map((video) => ({
+    ...video,
+    qualities: (qualityMap.get(video.id) ?? []).map((quality) => ({
+      id: quality.id,
+      quality: quality.quality,
+      url: quality.url,
+      bitrate: quality.bitrate,
+    })),
+  }));
+
+  return {
+    ...movie,
+    cast: castRows.map((cast) => ({ id: cast.id, name: cast.name })),
+    videos: hydratedVideos,
+  };
+};
+
+const hydrateMovies = async () => {
+  const movieRows = await db.select().from(movies).orderBy(desc(movies.createdAt));
+
+  const results = [];
+  for (const movie of movieRows) {
+    const hydrated = await getMovieAggregate({ id: movie.id }, "quality");
+    if (hydrated) {
+      results.push(hydrated);
     }
+  }
 
-    const existingMovie = await prisma.movie.findUnique({
-      where: { slug },
-    });
+  return results;
+};
 
-    if (existingMovie) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Slug already exists");
-    }
+export const createMovieUpload = asyncHandler(async (req: Request, res: Response) => {
+  const {
+    title,
+    shortDescription,
+    description,
+    slug,
+    genres: rawGenres,
+    language,
+    releaseYear,
+    ageRating,
+    duration,
+    rating,
+    cast,
+  } = req.body;
 
-    const movie = await prisma.movie.create({
-      data: {
+  if (
+    !title ||
+    !description ||
+    !slug ||
+    !rawGenres ||
+    !language ||
+    !releaseYear ||
+    !duration ||
+    !shortDescription ||
+    !ageRating ||
+    !rating
+  ) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      "All required fields must be provided",
+    );
+  }
+
+  const genresInput = Array.isArray(rawGenres) ? rawGenres : [rawGenres];
+  const existingMovie = await db.query.movies.findFirst({
+    where: eq(movies.slug, slug),
+  });
+
+  if (existingMovie) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Slug already exists");
+  }
+
+  const movie = await db.transaction(async (tx) => {
+    const [createdMovie] = await tx
+      .insert(movies)
+      .values({
         title,
         description,
         slug,
-        genres,
+        genres: genresInput,
         language,
         releaseYear: Number(releaseYear),
         duration: Number(duration),
         shortDescription,
         ageRating,
-        rating: Number(rating),
-        cast:
-          cast && Array.isArray(cast)
-            ? {
-                create: cast.map((name: string) => ({ name })),
-              }
-            : undefined,
-      },
+        rating: String(rating),
+        status: movieStatusEnum.enumValues[0],
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    if (cast && Array.isArray(cast) && cast.length > 0) {
+      await tx.insert(casts).values(
+        cast.map((name: string) => ({
+          movieId: createdMovie.id,
+          name,
+        })),
+      );
+    }
+
+    return createdMovie;
+  });
+
+  const createMultipart = async (type: string) => {
+    const key = `CreatorName1/CategoryName/Genre/Original/MovieName/${movie.id}/${type}-${Date.now()}.mp4`;
+    const command = new CreateMultipartUploadCommand({
+      Bucket: S3_CREDENTIAL.S3_BUCKET,
+      Key: key,
+      ContentType: "video/mp4",
+      ACL: "public-read",
     });
 
-    const createMultipart = async (type: string) => {
-      const key = `CreatorName1/CategoryName/Genre/Original/MovieName/${movie.id}/${type}-${Date.now()}.mp4`;
+    const response = await s3.send(command);
 
-      const command = new CreateMultipartUploadCommand({
-        Bucket: S3_CREDENTIAL.S3_BUCKET,
-        Key: key,
-        ContentType: "video/mp4",
-        ACL: "public-read",
-      });
-
-      const response = await s3.send(command);
-
-      return {
-        uploadId: response.UploadId,
-        key,
-      };
+    return {
+      uploadId: response.UploadId,
+      key,
     };
+  };
 
-    const createThumbnail = async () => {
-      const key = `CreatorName1/CategoryName/Genre/Original/MovieName/${movie.id}/thumbnail-${Date.now()}.jpg`;
+  const createThumbnail = async () => {
+    const key = `CreatorName1/CategoryName/Genre/Original/MovieName/${movie.id}/thumbnail-${Date.now()}.jpg`;
+    const command = new PutObjectCommand({
+      Bucket: S3_CREDENTIAL.S3_BUCKET,
+      Key: key,
+      ContentType: "image/jpeg",
+      ACL: "public-read",
+    });
 
-      const command = new PutObjectCommand({
-        Bucket: S3_CREDENTIAL.S3_BUCKET,
-        Key: key,
-        ContentType: "image/jpeg",
-        ACL: "public-read",
-      });
+    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3000 });
 
-      const uploadUrl = await getSignedUrl(s3, command, {
-        expiresIn: 3000,
-      });
-
-      return {
-        uploadUrl,
-        fileUrl: buildS3FileUrl(key),
-        key,
-      };
+    return {
+      uploadUrl,
+      fileUrl: buildS3FileUrl(key),
+      key,
     };
+  };
 
-    const [video, trailer, thumbnail] = await Promise.all([
-      createMultipart("video"),
-      createMultipart("trailer"),
-      createThumbnail(),
-    ]);
+  const [video, trailer, thumbnail] = await Promise.all([
+    createMultipart("video"),
+    createMultipart("trailer"),
+    createThumbnail(),
+  ]);
 
-    res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Upload initialized", {
-        movieId: movie.id,
-        upload: {
-          video,
-          trailer,
-          thumbnail,
-        },
-      }),
-    );
-  },
-);
+  res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Upload initialized", {
+      movieId: movie.id,
+      upload: {
+        video,
+        trailer,
+        thumbnail,
+      },
+    }),
+  );
+});
 
 export const getMultipartSignedUrl = asyncHandler(
   async (req: Request, res: Response) => {
@@ -156,10 +241,7 @@ export const getMultipartSignedUrl = asyncHandler(
       PartNumber: partNumber,
     });
 
-    const url = await getSignedUrl(s3, command, {
-      expiresIn: 3000,
-    });
-
+    const url = await getSignedUrl(s3, command, { expiresIn: 3000 });
     res.status(HTTP_STATUS.OK).json({ url });
   },
 );
@@ -172,41 +254,39 @@ export const completeMultipartUpload = asyncHandler(
       throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Missing fields");
     }
 
-    const command = new CompleteMultipartUploadCommand({
-      Bucket: S3_CREDENTIAL.S3_BUCKET,
-      Key: key,
-      UploadId: uploadId,
-      MultipartUpload: {
-        Parts: parts,
-      },
-    });
-
-    await s3.send(command);
+    await s3.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: S3_CREDENTIAL.S3_BUCKET,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: {
+          Parts: parts,
+        },
+      }),
+    );
 
     const fileUrl = buildS3FileUrl(key);
-    const updateData: Record<string, string> = {};
+    const [movie] = await db
+      .update(movies)
+      .set({
+        ...(type === "video" ? { videoUrl: fileUrl } : { trailerUrl: fileUrl }),
+        updatedAt: new Date(),
+      })
+      .where(eq(movies.id, movieId))
+      .returning();
 
-    if (type === "video") {
-      updateData.videoUrl = fileUrl;
-    }
-
-    if (type === "trailer") {
-      updateData.trailerUrl = fileUrl;
-    }
-
-    const queueJob = await videoQueue.add("convert-to-hls", {
-      videoUrl: fileUrl,
-      movieId,
-      sourceKey: key,
-      assetType: type,
-    }, {
-      jobId: `${movieId}:${type}:${Date.now()}`,
-    });
-
-    const movie = await prisma.movie.update({
-      where: { id: movieId },
-      data: updateData,
-    });
+    const queueJob = await videoQueue.add(
+      "convert-to-hls",
+      {
+        videoUrl: fileUrl,
+        movieId,
+        sourceKey: key,
+        assetType: type,
+      },
+      {
+        jobId: `${movieId}:${type}:${Date.now()}`,
+      },
+    );
 
     res.status(HTTP_STATUS.OK).json(
       new ApiResponse(HTTP_STATUS.OK, "Upload complete", {
@@ -218,28 +298,27 @@ export const completeMultipartUpload = asyncHandler(
   },
 );
 
-export const saveThumbnail = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { movieId, thumbnailUrl } = req.body;
+export const saveThumbnail = asyncHandler(async (req: Request, res: Response) => {
+  const { movieId, thumbnailUrl } = req.body;
 
-    if (!movieId || !thumbnailUrl) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Missing fields");
-    }
+  if (!movieId || !thumbnailUrl) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Missing fields");
+  }
 
-    const movie = await prisma.movie.update({
-      where: { id: movieId },
-      data: { thumbnailUrl },
-    });
+  const [movie] = await db
+    .update(movies)
+    .set({
+      thumbnailUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(movies.id, movieId))
+    .returning();
 
-    res
-      .status(HTTP_STATUS.OK)
-      .json(new ApiResponse(HTTP_STATUS.OK, "Thumbnail saved", movie));
-  },
-);
+  res
+    .status(HTTP_STATUS.OK)
+    .json(new ApiResponse(HTTP_STATUS.OK, "Thumbnail saved", movie));
+});
 
-// =======================================================
-// 5. GET VIDEO PROCESSING STATUS
-// =======================================================
 export const getVideoProcessingStatus = asyncHandler(
   async (req: Request, res: Response) => {
     const { movieId, assetType } = req.params;
@@ -259,18 +338,20 @@ export const getVideoProcessingStatus = asyncHandler(
         ])
       )
         .filter(
-          (j) => j.data.movieId === movieId && j.data.assetType === assetType,
+          (currentJob) =>
+            currentJob.data.movieId === movieId &&
+            currentJob.data.assetType === assetType,
         )
         .sort((a, b) => b.timestamp - a.timestamp)[0];
 
     if (!job) {
       return res.status(HTTP_STATUS.NOT_FOUND).json(
-        new ApiResponse(HTTP_STATUS.NOT_FOUND, "Job not found", null)
+        new ApiResponse(HTTP_STATUS.NOT_FOUND, "Job not found", null),
       );
     }
+
     const state = await job.getState();
     const progress = job.progress as Record<string, unknown> | number;
-
     const progressData =
       typeof progress === "object" && progress !== null
         ? progress
@@ -282,9 +363,9 @@ export const getVideoProcessingStatus = asyncHandler(
         state,
         progress: progressData,
         failedReason: state === "failed" ? job.failedReason : undefined,
-      })
+      }),
     );
-  }
+  },
 );
 
 export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
@@ -295,16 +376,12 @@ export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Movie ID is required");
   }
 
-  const movie = await prisma.movie.findUnique({
-    where: { id: movieId },
-    include: { videos: true },
-  });
+  const movie = await getMovieAggregate({ id: movieId });
 
   if (!movie) {
     throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
   }
 
-  // S3 me ek prefix ke andar saare objects delete karna
   const deleteFolderByPrefix = async (prefix: string) => {
     let continuationToken: string | undefined;
 
@@ -324,8 +401,8 @@ export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
             Delete: {
               Objects: listed.Contents
                 .map((item) => item.Key)
-                .filter((key): key is string => Boolean(key))
-                .map((key) => ({ Key: key })),
+                .filter((item): item is string => Boolean(item))
+                .map((item) => ({ Key: item })),
             },
           }),
         );
@@ -334,11 +411,9 @@ export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
       continuationToken = listed.IsTruncated
         ? listed.NextContinuationToken
         : undefined;
-
     } while (continuationToken);
   };
 
-  // Single object delete
   const deleteSingleObject = async (key: string) => {
     await s3.send(
       new DeleteObjectCommand({
@@ -348,61 +423,44 @@ export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
     );
   };
 
-  
-  const getOriginalPrefixFromProcessingUrl = (url: string | null | undefined): string | null => {
+  const getOriginalPrefixFromProcessingUrl = (
+    url: string | null | undefined,
+  ): string | null => {
     if (!url) return null;
     const key = extractKeyFromUrl(url);
     if (!key) return null;
 
-    const processingFolderPrefix = key
-      .replace(/\/[^/]+$/, "/") // last segment (master.m3u8) hata do
-      .replace("/Processing/", "/Original/"); // Processing → Original
-
-    return processingFolderPrefix;
+    return key.replace(/\/[^/]+$/, "/").replace("/Processing/", "/Original/");
   };
 
-  // Processing URL se Processing folder prefix nikalo
-  const getProcessingPrefix = (url: string | null | undefined): string | null => {
+  const getProcessingPrefix = (
+    url: string | null | undefined,
+  ): string | null => {
     if (!url) return null;
     const key = extractKeyFromUrl(url);
     if (!key || !key.includes("/Processing/")) return null;
 
-    // "CreatorName/.../Processing/MovieName/{id}/video/" tak ka prefix
     return key.replace(/\/[^/]+$/, "/");
   };
 
   const deletePromises: Promise<void>[] = [];
 
-  // --- VIDEO (original + processing) ---
   if (movie.videoUrl) {
     const processingPrefix = getProcessingPrefix(movie.videoUrl);
     const originalPrefix = getOriginalPrefixFromProcessingUrl(movie.videoUrl);
 
-    if (processingPrefix) {
-      deletePromises.push(deleteFolderByPrefix(processingPrefix));
-    }
-
-    if (originalPrefix) {
-      // Original folder me sirf is movie ka .mp4 hoga, prefix se delete karo
-      deletePromises.push(deleteFolderByPrefix(originalPrefix));
-    }
+    if (processingPrefix) deletePromises.push(deleteFolderByPrefix(processingPrefix));
+    if (originalPrefix) deletePromises.push(deleteFolderByPrefix(originalPrefix));
   }
 
-  // --- TRAILER (original + processing) ---
   if (movie.trailerUrl) {
     const processingPrefix = getProcessingPrefix(movie.trailerUrl);
     const originalPrefix = getOriginalPrefixFromProcessingUrl(movie.trailerUrl);
 
-    if (processingPrefix) {
-      deletePromises.push(deleteFolderByPrefix(processingPrefix));
-    }
-
-    if (originalPrefix) {
-      deletePromises.push(deleteFolderByPrefix(originalPrefix));
-    }
+    if (processingPrefix) deletePromises.push(deleteFolderByPrefix(processingPrefix));
+    if (originalPrefix) deletePromises.push(deleteFolderByPrefix(originalPrefix));
   }
 
-  // --- THUMBNAIL ---
   if (movie.thumbnailUrl) {
     const key = extractKeyFromUrl(movie.thumbnailUrl);
     if (key) {
@@ -410,168 +468,68 @@ export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  // Saare S3 deletes parallel chalao
   await Promise.all(deletePromises);
-
-  // DB se movie delete (cascade se Cast, Video, VideoQuality sab jayega)
-  await prisma.movie.delete({
-    where: { id: movieId },
-  });
+  await db.delete(movies).where(eq(movies.id, movieId));
 
   res.status(HTTP_STATUS.OK).json(
     new ApiResponse(HTTP_STATUS.OK, "Movie and files deleted successfully", {}),
   );
 });
 
+export const getMovieById = asyncHandler(async (req: Request, res: Response) => {
+  const movieId =
+    typeof req.params.id === "string" ? req.params.id : req.params.id?.[0];
 
-export const getMovieById = asyncHandler(
-  async (req: Request, res: Response) => {
-    const movieId =
-      typeof req.params.id === "string"
-        ? req.params.id
-        : req.params.id?.[0];
-
-    if (!movieId) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Movie ID is required");
-    }
-
-    const movie = await prisma.movie.findUnique({
-      where: { id: movieId },
-      include: {
-        cast: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        videos: {
-          include: {
-            qualities: {
-              orderBy: { createdAt: "asc" },
-              select: {
-                id: true,
-                quality: true,
-                url: true,
-                bitrate: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!movie) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
-    }
-
-    // 🎯 Separate videos & trailers
-    const movieVideos = movie.videos.filter(
-      (v: Video) => v.type === "MOVIE"
-    );
-
-    const trailers = movie.videos.filter(
-      (v: Video) => v.type === "TRAILER"
-    );
-
-    const response = {
-      ...movie,
-      videos: movieVideos,
-      trailers,
-    };
-
-    return res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Movie fetched successfully", {
-        movie: response,
-      })
-    );
+  if (!movieId) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Movie ID is required");
   }
-);
 
+  const movie = await getMovieAggregate({ id: movieId });
 
-export const getAllMovies = asyncHandler(
-  async (req: Request, res: Response) => {
-    const movies = await prisma.movie.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        cast: {
-          select: { id: true, name: true },
-        },
-        videos: {
-          include: {
-            qualities: {
-              orderBy: { quality: "asc" }, // 1080p, 360p, 480p, 720p alphabetical
-              select: {
-                id: true,
-                quality: true,
-                url: true,
-                bitrate: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Movies fetched", { movies })
-    );
+  if (!movie) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
   }
-);
 
+  const movieVideos = movie.videos.filter((video: VideoRow) => video.type === "MOVIE");
+  const trailers = movie.videos.filter((video: VideoRow) => video.type === "TRAILER");
 
-export const getMovieBySlug = asyncHandler(
-  async (req: Request, res: Response) => {
-    const slug  = req.params.slug as string ;
-
-    const movie = await prisma.movie.findUnique({
-      where: { slug },
-      include: {
-        cast: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        videos: {
-          include: {
-            qualities: {
-              orderBy: { createdAt: "asc" },
-              select: {
-                id: true,
-                quality: true,
-                url: true,
-                bitrate: true,
-              },
-            },
-          },
-        },
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Movie fetched successfully", {
+      movie: {
+        ...movie,
+        videos: movieVideos,
+        trailers,
       },
-    });
+    }),
+  );
+});
 
-    if (!movie) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
-    }
+export const getAllMovies = asyncHandler(async (_req: Request, res: Response) => {
+  const movieRows = await hydrateMovies();
 
-    // 🎯 Separate movie & trailer videos
-    const movieVideos = movie.videos.filter(
-      (v: Video) => v.type === "MOVIE"
-    );
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Movies fetched", { movies: movieRows }),
+  );
+});
 
-    const trailers = movie.videos.filter(
-      (v: Video) => v.type === "TRAILER"
-    );
+export const getMovieBySlug = asyncHandler(async (req: Request, res: Response) => {
+  const slug = req.params.slug as string;
+  const movie = await getMovieAggregate({ slug });
 
-    // 🎯 Clean response (remove raw videos array)
-    const response = {
-      ...movie,
-      videos: movieVideos,
-      trailers,
-    };
-
-    return res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Movie fetched successfully", {
-        movie: response,
-      })
-    );
+  if (!movie) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
   }
-);
+
+  const movieVideos = movie.videos.filter((video: VideoRow) => video.type === "MOVIE");
+  const trailers = movie.videos.filter((video: VideoRow) => video.type === "TRAILER");
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Movie fetched successfully", {
+      movie: {
+        ...movie,
+        videos: movieVideos,
+        trailers,
+      },
+    }),
+  );
+});

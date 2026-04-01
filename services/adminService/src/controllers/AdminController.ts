@@ -1,418 +1,342 @@
-import Admin from "../models/AdminModel.js";
-import Creator from "../models/CreatorModel.js";
+import { and, desc, eq, gt, ilike, or, sql } from "drizzle-orm";
 import { Request, Response } from "express";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { HTTP_STATUS, MESSAGES } from "../constants/constant.js";
+import { HTTP_STATUS, MESSAGES, FRONTEND_URL } from "../constants/constant.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
-import bcrypt from "bcrypt";
 import { generateToken } from "../utils/jwt.js";
-import emailQueue from "../queue/queue.js";
-import crypto from "crypto";
-import Genre from "../models/genreModel.js";
-import Language from "../models/languageModel.js";
+import { deleteFromS3 } from "../utils/s3Delete.js";
+import { db } from "../config/db.js";
+import { admins, creators, genres, languages } from "../db/schema.js";
 import {
   decryptPassword,
   encryptPassword,
   verifyPassword,
 } from "../utils/encryption.js";
-import { deleteFromS3 } from "../utils/s3Delete.js";
-import { prisma } from "../config/db.js"; 
-import { FRONTEND_URL } from "../constants/constant.js";
 import { sendEmail } from "../config/sendEmail.js";
 
+const parseCount = (value: unknown) => Number(value ?? 0);
 
-export const createAdmin = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { name, email, password } = req.body;
+export const createAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
 
-    if (!email || !password || !name) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "name, email and password are required"
-      );
-    }
-
-    const existingAdmin = await prisma.admin.findUnique({
-      where: { email },
-    });
-
-    if (existingAdmin) {
-      throw new ApiError(
-        HTTP_STATUS.CONFLICT,
-        "Admin with this email already exists"
-      );
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const admin = await prisma.admin.create({
-      data: {
-        name,
-        email,
-        password: hashedPassword,
-        role: "admin", 
-      },
-    });
-
-    res.status(HTTP_STATUS.CREATED).json(
-      new ApiResponse(HTTP_STATUS.CREATED, MESSAGES.ADMIN.CREATED, {
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
-      })
+  if (!email || !password || !name) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      "name, email and password are required",
     );
   }
-);
 
-export const loginAdmin = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { email, password } = req.body;
+  const existingAdmin = await db.query.admins.findFirst({
+    where: eq(admins.email, email),
+  });
 
-    // ✅ Check required fields
-    if (!email || !password) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "email and password are required"
-      );
-    }
-
-    // ✅ Find admin by email
-    const admin = await prisma.admin.findUnique({
-      where: { email },
-    });
-
-    if (!admin) {
-      throw new ApiError(
-        HTTP_STATUS.UNAUTHORIZED,
-        MESSAGES.AUTH.INVALID_CREDENTIALS
-      );
-    }
-
-    // ✅ Compare password
-    const isPasswordValid = await bcrypt.compare(password, admin.password);
-    if (!isPasswordValid) {
-      throw new ApiError(
-        HTTP_STATUS.UNAUTHORIZED,
-        MESSAGES.AUTH.INVALID_CREDENTIALS
-      );
-    }
-
-    // ✅ Generate JWT
-    const token = await generateToken({ id: admin.id, role: admin.role });
-
-    // ✅ Send response
-    res
-      .status(HTTP_STATUS.OK)
-      .json(new ApiResponse(HTTP_STATUS.OK, MESSAGES.ADMIN.LOGIN_SUCCESS, { token }));
-  }
-);
-
-export const createCreator = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { name, email, password } = req.body;
-
-    // ✅ Required fields check
-    if (!email || !password || !name) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "name, email and password are required"
-      );
-    }
-
-    // ✅ Check if creator already exists
-    const existing = await prisma.creator.findUnique({
-      where: { email },
-    });
-
-    if (existing) {
-      throw new ApiError(
-        HTTP_STATUS.CONFLICT,
-        MESSAGES.CREATOR.ALREADY_EXISTS
-      );
-    }
-
-    // ✅ Create creator
-    const creator = await prisma.creator.create({
-      data: {
-        name,
-        email,
-        password,
-        role: "creator", // default role
-        emailVerified: false,
-      },
-    });
-
-    // ✅ Response
-    res.status(HTTP_STATUS.CREATED).json(
-      new ApiResponse(HTTP_STATUS.CREATED, MESSAGES.CREATOR.CREATED, {
-        name: creator.name,
-        email: creator.email,
-        role: creator.role,
-      })
+  if (existingAdmin) {
+    throw new ApiError(
+      HTTP_STATUS.CONFLICT,
+      "Admin with this email already exists",
     );
   }
-);
 
-// update
-export const updateCreator = asyncHandler(
-  async (req: Request, res: Response) => {
-    const rawId = req.params.id;
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const [admin] = await db
+    .insert(admins)
+    .values({
+      name,
+      email,
+      password: hashedPassword,
+      role: "admin",
+      updatedAt: new Date(),
+    })
+    .returning();
 
-    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  res.status(HTTP_STATUS.CREATED).json(
+    new ApiResponse(HTTP_STATUS.CREATED, MESSAGES.ADMIN.CREATED, {
+      name: admin.name,
+      email: admin.email,
+      role: admin.role,
+    }),
+  );
+});
 
-    if (!id) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Creator id is required");
-    }
+export const loginAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password } = req.body;
 
-    const { name, email } = req.body;
-
-    const existingCreator = await prisma.creator.findUnique({
-      where: { id },
-    });
-
-    if (!existingCreator) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
-    }
-
-    const updatedCreator = await prisma.creator.update({
-      where: { id },
-      data: {
-        name: name ?? existingCreator.name,
-        email: email ?? existingCreator.email,
-      },
-    });
-
-    res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Creator updated successfully", updatedCreator)
+  if (!email || !password) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      "email and password are required",
     );
   }
-);
-// delete
-export const deleteCreator = asyncHandler(
-  async (req: Request, res: Response) => {
-    const rawId = req.params.id;
 
-    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const admin = await db.query.admins.findFirst({
+    where: eq(admins.email, email),
+  });
 
-    if (!id) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Creator id is required");
-    }
-
-    const existingCreator = await prisma.creator.findUnique({
-      where: { id },
-    });
-
-    if (!existingCreator) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
-    }
-
-    await prisma.creator.delete({
-      where: { id },
-    });
-
-    res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Creator deleted successfully", null)
+  if (!admin) {
+    throw new ApiError(
+      HTTP_STATUS.UNAUTHORIZED,
+      MESSAGES.AUTH.INVALID_CREDENTIALS,
     );
   }
-);
 
-export const getAllCreator = asyncHandler(
-  async (req: Request, res: Response) => {
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 10;
-    const search = (req.query.search as string) || "";
+  const isPasswordValid = await bcrypt.compare(password, admin.password);
 
-    const where = search
-      ? {
-          OR: [
-            { name: { contains: search, mode: "insensitive" as const } },
-            { email: { contains: search, mode: "insensitive" as const } },
-          ],
-        }
-      : {};
-
-    const total = await prisma.creator.count({ where });
-
-    const creators = await prisma.creator.findMany({
-      where,
-      skip: (page - 1) * limit,
-      take: limit,
-      orderBy: { createdAt: "desc" },
-    });
-
-    const decryptedCreators = creators.map((c) => ({
-      id: c.id,
-      name: c.name,
-      email: c.email,
-      role: c.role,
-      password: c.password ? decryptPassword(c.password) : null,
-    }));
-
-    res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Creators fetched successfully", {
-        creators: decryptedCreators,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit),
-        },
-      })
+  if (!isPasswordValid) {
+    throw new ApiError(
+      HTTP_STATUS.UNAUTHORIZED,
+      MESSAGES.AUTH.INVALID_CREDENTIALS,
     );
   }
-)
 
+  const token = await generateToken({ id: admin.id, role: admin.role });
 
-// ✅ LOGIN CREATOR
-// ==========================================
+  res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, MESSAGES.ADMIN.LOGIN_SUCCESS, { token }),
+  );
+});
 
-export const loginCreator = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { email, password } = req.body;
+export const createCreator = asyncHandler(async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
 
-    if (!email || !password) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "Email and password are required"
-      );
-    }
+  if (!email || !password || !name) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      "name, email and password are required",
+    );
+  }
 
-    // 🔍 Find creator
-    const creator = await prisma.creator.findUnique({
-      where: { email },
-    });
+  const existing = await db.query.creators.findFirst({
+    where: eq(creators.email, email),
+  });
 
-    if (!creator) {
-      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid credentials");
-    }
+  if (existing) {
+    throw new ApiError(HTTP_STATUS.CONFLICT, MESSAGES.CREATOR.ALREADY_EXISTS);
+  }
 
-    const verifyPassword = () => {
-      if (creator.password === password) {
-        return true;
-      }
-    }
+  const [creator] = await db
+    .insert(creators)
+    .values({
+      name,
+      email,
+      password: encryptPassword(password),
+      role: "creator",
+      emailVerified: false,
+      updatedAt: new Date(),
+    })
+    .returning();
 
-    // 🔐 Check password
-    const isPasswordValid = verifyPassword();
-
-    if (!isPasswordValid) {
-      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid credentials");
-    }
-
-    // ==========================================
-    // ❗ EMAIL NOT VERIFIED FLOW
-    // ==========================================
-    if (!creator.emailVerified) {
-      // 🎯 Generate token
-      const token = crypto.randomBytes(32).toString("hex");
-
-      const hashedToken = crypto
-        .createHash("sha256")
-        .update(token)
-        .digest("hex");
-
-      // 💾 Save token in DB
-      await prisma.creator.update({
-        where: { id: creator.id },
-        data: {
-          emailVerificationToken: hashedToken,
-          emailVerificationExpires: new Date(Date.now() + 10 * 60 * 1000), // 10 min
-        },
-      });
-
-      // 🔗 Verification URL
-      const verifyUrl = `${FRONTEND_URL}/verify-email/${token}`;
-
-      // 📩 Send email (DIRECT)
-      await sendEmail(
-        creator.email,
-        "Verify your email",
-        `<h2>Email Verification</h2>
-         <p>Click below to verify your email:</p>
-         <a href="${verifyUrl}">Verify Email</a>`
-      );
-
-      return res.status(HTTP_STATUS.OK).json(
-        new ApiResponse(
-          HTTP_STATUS.OK,
-          "Verification email sent. Please verify first."
-        )
-      );
-    }
-
-    // ==========================================
-    // ✅ NORMAL LOGIN
-    // ==========================================
-    const jwtToken = await generateToken({
-      id: creator.id,
+  res.status(HTTP_STATUS.CREATED).json(
+    new ApiResponse(HTTP_STATUS.CREATED, MESSAGES.CREATOR.CREATED, {
+      name: creator.name,
+      email: creator.email,
       role: creator.role,
-    });
+    }),
+  );
+});
 
-    return res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, MESSAGES.CREATOR.LOGIN_SUCCESS, {
-        token: jwtToken,
-      })
+export const updateCreator = asyncHandler(async (req: Request, res: Response) => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  if (!id) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Creator id is required");
+  }
+
+  const { name, email } = req.body;
+
+  const existingCreator = await db.query.creators.findFirst({
+    where: eq(creators.id, id),
+  });
+
+  if (!existingCreator) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
+  }
+
+  const [updatedCreator] = await db
+    .update(creators)
+    .set({
+      name: name ?? existingCreator.name,
+      email: email ?? existingCreator.email,
+      updatedAt: new Date(),
+    })
+    .where(eq(creators.id, id))
+    .returning();
+
+  res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(
+      HTTP_STATUS.OK,
+      "Creator updated successfully",
+      updatedCreator,
+    ),
+  );
+});
+
+export const deleteCreator = asyncHandler(async (req: Request, res: Response) => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  if (!id) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Creator id is required");
+  }
+
+  const existingCreator = await db.query.creators.findFirst({
+    where: eq(creators.id, id),
+  });
+
+  if (!existingCreator) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
+  }
+
+  await db.delete(creators).where(eq(creators.id, id));
+
+  res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Creator deleted successfully", null),
+  );
+});
+
+export const getAllCreator = asyncHandler(async (req: Request, res: Response) => {
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 10;
+  const search = (req.query.search as string) || "";
+  const whereClause = search
+    ? or(ilike(creators.name, `%${search}%`), ilike(creators.email, `%${search}%`))
+    : undefined;
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(creators)
+    .where(whereClause);
+
+  const creatorRows = await db
+    .select()
+    .from(creators)
+    .where(whereClause)
+    .orderBy(desc(creators.createdAt))
+    .limit(limit)
+    .offset((page - 1) * limit);
+
+  const decryptedCreators = creatorRows.map((creator) => ({
+    ...creator,
+    password: creator.password ? decryptPassword(creator.password) : null,
+  }));
+
+  res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Creators fetched successfully", {
+      creators: decryptedCreators,
+      pagination: {
+        total: parseCount(count),
+        page,
+        limit,
+        totalPages: Math.ceil(parseCount(count) / limit),
+      },
+    }),
+  );
+});
+
+export const loginCreator = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      "Email and password are required",
     );
   }
-);
 
-export const verifyEmail = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { token } = req.query;
+  const creator = await db.query.creators.findFirst({
+    where: eq(creators.email, email),
+  });
 
-    if (!token || typeof token !== "string") {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Token is required");
-    }
+  if (!creator || !verifyPassword(password, creator.password)) {
+    throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid credentials");
+  }
 
-    // 🔐 Hash token
-    const hashedToken = crypto
-      .createHash("sha256")
-      .update(token)
-      .digest("hex");
+  if (!creator.emailVerified) {
+    const token = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-    // 🔍 Find creator
-    const creator = await prisma.creator.findFirst({
-      where: {
+    await db
+      .update(creators)
+      .set({
         emailVerificationToken: hashedToken,
-        emailVerificationExpires: {
-          gt: new Date(), // not expired
-        },
-      },
-    });
+        emailVerificationExpires: new Date(Date.now() + 10 * 60 * 1000),
+        updatedAt: new Date(),
+      })
+      .where(eq(creators.id, creator.id));
 
-    if (!creator) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "Invalid or expired token"
-      );
-    }
+    const verifyUrl = `${FRONTEND_URL}/verify-email/${token}`;
 
-    // ✅ Update verified
-    const updatedCreator = await prisma.creator.update({
-      where: { id: creator.id },
-      data: {
-        emailVerified: true,
-        emailVerificationToken: null,
-        emailVerificationExpires: null,
-      },
-    });
-
-    // 🔑 Generate JWT after verify
-    const jwtToken = await generateToken({
-      id: updatedCreator.id,
-      role: updatedCreator.role,
-    });
+    await sendEmail(
+      creator.email,
+      "Verify your email",
+      `<h2>Email Verification</h2>
+         <p>Click below to verify your email:</p>
+         <a href="${verifyUrl}">Verify Email</a>`,
+    );
 
     return res.status(HTTP_STATUS.OK).json(
       new ApiResponse(
         HTTP_STATUS.OK,
-        "Email verified successfully",
-        { token: jwtToken }
-      )
+        "Verification email sent. Please verify first.",
+      ),
     );
   }
-);
+
+  const jwtToken = await generateToken({
+    id: creator.id,
+    role: creator.role ?? "creator",
+  });
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, MESSAGES.CREATOR.LOGIN_SUCCESS, {
+      token: jwtToken,
+    }),
+  );
+});
+
+export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.query;
+
+  if (!token || typeof token !== "string") {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Token is required");
+  }
+
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+  const creator = await db.query.creators.findFirst({
+    where: and(
+      eq(creators.emailVerificationToken, hashedToken),
+      gt(creators.emailVerificationExpires, new Date()),
+    ),
+  });
+
+  if (!creator) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Invalid or expired token");
+  }
+
+  const [updatedCreator] = await db
+    .update(creators)
+    .set({
+      emailVerified: true,
+      emailVerificationToken: null,
+      emailVerificationExpires: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(creators.id, creator.id))
+    .returning();
+
+  const jwtToken = await generateToken({
+    id: updatedCreator.id,
+    role: updatedCreator.role ?? "creator",
+  });
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Email verified successfully", {
+      token: jwtToken,
+    }),
+  );
+});
 
 export const createGenre = asyncHandler(async (req: Request, res: Response) => {
   const { name } = req.body;
@@ -421,23 +345,18 @@ export const createGenre = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(HTTP_STATUS.BAD_REQUEST, "name and image are required");
   }
 
-  const imageUrl = req.file.location;
-
-  // Prisma me check karenge agar same name ka genre exist karta hai
-  const existingGenre = await prisma.genre.findUnique({
-    where: { name },
+  const existingGenre = await db.query.genres.findFirst({
+    where: eq(genres.name, name),
   });
 
   if (existingGenre) {
     throw new ApiError(HTTP_STATUS.CONFLICT, "Genre name already exists");
   }
 
-  // Genre create karenge
-  await prisma.genre.create({
-    data: {
-      name,
-      image: imageUrl,
-    },
+  await db.insert(genres).values({
+    name,
+    image: req.file.location,
+    updatedAt: new Date(),
   });
 
   return res
@@ -445,19 +364,16 @@ export const createGenre = asyncHandler(async (req: Request, res: Response) => {
     .json(new ApiResponse(HTTP_STATUS.CREATED, "Genre created successfully"));
 });
 
-
 export const updateGenre = asyncHandler(async (req: Request, res: Response) => {
-  const rawId = req.params.id;
-
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;   // ✅ safe handling
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { name } = req.body;
 
   if (!id) {
     throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
   }
 
-  const genre = await prisma.genre.findUnique({
-    where: { id },
+  const genre = await db.query.genres.findFirst({
+    where: eq(genres.id, id),
   });
 
   if (!genre) {
@@ -467,38 +383,36 @@ export const updateGenre = asyncHandler(async (req: Request, res: Response) => {
   let imageUrl = genre.image;
 
   if (req.file) {
-    const newImage = req.file.location;
-
     if (genre.image) {
       await deleteFromS3(genre.image);
     }
-
-    imageUrl = newImage;
+    imageUrl = req.file.location;
   }
 
-  const updatedGenre = await prisma.genre.update({
-    where: { id },
-    data: {
+  const [updatedGenre] = await db
+    .update(genres)
+    .set({
       name: name ?? genre.name,
       image: imageUrl,
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .where(eq(genres.id, id))
+    .returning();
 
   return res.json(
-    new ApiResponse(HTTP_STATUS.OK, "Genre updated successfully", updatedGenre)
+    new ApiResponse(HTTP_STATUS.OK, "Genre updated successfully", updatedGenre),
   );
 });
-export const deleteGenre = asyncHandler(async (req: Request, res: Response) => {
-  const rawId = req.params.id;
 
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;   // ✅ safe
+export const deleteGenre = asyncHandler(async (req: Request, res: Response) => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
   if (!id) {
     throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
   }
 
-  const genre = await prisma.genre.findUnique({
-    where: { id },
+  const genre = await db.query.genres.findFirst({
+    where: eq(genres.id, id),
   });
 
   if (!genre) {
@@ -509,12 +423,10 @@ export const deleteGenre = asyncHandler(async (req: Request, res: Response) => {
     await deleteFromS3(genre.image);
   }
 
-  await prisma.genre.delete({
-    where: { id },
-  });
+  await db.delete(genres).where(eq(genres.id, id));
 
   return res.json(
-    new ApiResponse(HTTP_STATUS.OK, "Genre deleted successfully", null)
+    new ApiResponse(HTTP_STATUS.OK, "Genre deleted successfully", null),
   );
 });
 
@@ -522,40 +434,31 @@ export const getAllGenres = asyncHandler(async (req: Request, res: Response) => 
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 10;
   const search = (req.query.search as string) || "";
+  const whereClause = search ? ilike(genres.name, `%${search}%`) : undefined;
 
-  // Filter construct
-  const where = search
-    ? {
-        name: {
-          contains: search,
-          mode: "insensitive" as const, // Prisma me QueryMode
-        },
-      }
-    : {};
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(genres)
+    .where(whereClause);
 
-  // Total count
-  const total = await prisma.genre.count({ where });
-
-  // Get paginated genres
-  const genres = await prisma.genre.findMany({
-    where,
-    skip: (page - 1) * limit,
-    take: limit,
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const genreRows = await db
+    .select()
+    .from(genres)
+    .where(whereClause)
+    .orderBy(desc(genres.createdAt))
+    .limit(limit)
+    .offset((page - 1) * limit);
 
   res.status(HTTP_STATUS.OK).json(
     new ApiResponse(HTTP_STATUS.OK, "Genres fetched successfully", {
-      data: genres,
+      data: genreRows,
       pagination: {
-        total,
+        total: parseCount(count),
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(parseCount(count) / limit),
       },
-    })
+    }),
   );
 });
 
@@ -566,143 +469,138 @@ export const createLanguage = asyncHandler(async (req: Request, res: Response) =
     throw new ApiError(HTTP_STATUS.BAD_REQUEST, "name and image are required");
   }
 
-  const imageUrl = req.file.location;
-
-  // Check if language with same name exists
-  const existingLanguage = await prisma.language.findUnique({
-    where: { name },
+  const existingLanguage = await db.query.languages.findFirst({
+    where: eq(languages.name, name),
   });
 
   if (existingLanguage) {
     throw new ApiError(HTTP_STATUS.CONFLICT, "Language name already exists");
   }
 
-  // Create language
-  const language = await prisma.language.create({
-    data: {
+  const [language] = await db
+    .insert(languages)
+    .values({
       name,
-      image: imageUrl,
-    },
-  });
+      image: req.file.location,
+      updatedAt: new Date(),
+    })
+    .returning();
 
   return res.status(HTTP_STATUS.CREATED).json(
-    new ApiResponse(HTTP_STATUS.CREATED, "Language created successfully", language)
+    new ApiResponse(
+      HTTP_STATUS.CREATED,
+      "Language created successfully",
+      language,
+    ),
   );
 });
-export const updateLanguage = asyncHandler(async (req: Request, res: Response) => {
-  const rawId = req.params.id;
 
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;   // ✅ safe handling
-  const { name } = req.body;
+export const updateLanguage = asyncHandler(
+  async (req: Request, res: Response) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { name } = req.body;
 
-  if (!id) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
-  }
+    if (!id) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
 
-  // Check if language exists
-  const existingLanguage = await prisma.language.findUnique({
-    where: { id },
-  });
+    const existingLanguage = await db.query.languages.findFirst({
+      where: eq(languages.id, id),
+    });
 
-  if (!existingLanguage) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
-  }
+    if (!existingLanguage) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
+    }
 
-  let imageUrl = existingLanguage.image;
+    let imageUrl = existingLanguage.image;
 
-  // Update image if new file is uploaded
-  if (req.file) {
-    const newImage = req.file.location;
+    if (req.file) {
+      if (existingLanguage.image) {
+        await deleteFromS3(existingLanguage.image);
+      }
+      imageUrl = req.file.location;
+    }
+
+    const [updatedLanguage] = await db
+      .update(languages)
+      .set({
+        name: name ?? existingLanguage.name,
+        image: imageUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(languages.id, id))
+      .returning();
+
+    return res.json(
+      new ApiResponse(
+        HTTP_STATUS.OK,
+        "Language updated successfully",
+        updatedLanguage,
+      ),
+    );
+  },
+);
+
+export const deleteLanguage = asyncHandler(
+  async (req: Request, res: Response) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    if (!id) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
+
+    const existingLanguage = await db.query.languages.findFirst({
+      where: eq(languages.id, id),
+    });
+
+    if (!existingLanguage) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
+    }
 
     if (existingLanguage.image) {
       await deleteFromS3(existingLanguage.image);
     }
 
-    imageUrl = newImage;
-  }
+    await db.delete(languages).where(eq(languages.id, id));
 
-  // Update language
-  const updatedLanguage = await prisma.language.update({
-    where: { id },
-    data: {
-      name: name ?? existingLanguage.name,
-      image: imageUrl,
-    },
-  });
+    return res.json(
+      new ApiResponse(HTTP_STATUS.OK, "Language deleted successfully", null),
+    );
+  },
+);
 
-  return res.json(
-    new ApiResponse(
-      HTTP_STATUS.OK,
-      "Language updated successfully",
-      updatedLanguage
-    )
-  );
-});
-export const deleteLanguage = asyncHandler(async (req: Request, res: Response) => {
-  const rawId = req.params.id;
+export const getAllLanguages = asyncHandler(
+  async (req: Request, res: Response) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = (req.query.search as string) || "";
+    const whereClause = search
+      ? ilike(languages.name, `%${search}%`)
+      : undefined;
 
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;   // ✅ safe
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(languages)
+      .where(whereClause);
 
-  if (!id) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
-  }
+    const languageRows = await db
+      .select()
+      .from(languages)
+      .where(whereClause)
+      .orderBy(desc(languages.createdAt))
+      .limit(limit)
+      .offset((page - 1) * limit);
 
-  // Check if language exists
-  const existingLanguage = await prisma.language.findUnique({
-    where: { id },
-  });
-
-  if (!existingLanguage) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
-  }
-
-  // Delete image from S3 if exists
-  if (existingLanguage.image) {
-    await deleteFromS3(existingLanguage.image);
-  }
-
-  // Delete language
-  await prisma.language.delete({
-    where: { id },
-  });
-
-  return res.json(
-    new ApiResponse(HTTP_STATUS.OK, "Language deleted successfully", null)
-  );
-});
-
-export const getAllLanguages = asyncHandler(async (req: Request, res: Response) => {
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 10;
-  const search = (req.query.search as string) || "";
-
-  const where = search
-    ? {
-        name: {
-          contains: search,
-          mode: "insensitive" as "insensitive", // <-- direct type assertion
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Languages fetched successfully", {
+        languages: languageRows,
+        pagination: {
+          total: parseCount(count),
+          page,
+          limit,
+          totalPages: Math.ceil(parseCount(count) / limit),
         },
-      }
-    : {};
-
-  const total = await prisma.language.count({ where });
-
-  const languages = await prisma.language.findMany({
-    where,
-    skip: (page - 1) * limit,
-    take: limit,
-    orderBy: { createdAt: "desc" },
-  });
-
-  res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Languages fetched successfully", {
-      languages,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    })
-  );
-});
+      }),
+    );
+  },
+);

@@ -25,19 +25,6 @@ services:
       retries: 10
       start_period: 10s
 
-  prisma-migrate:
-    build:
-      context: ./services/adminService
-      dockerfile: Dockerfile
-    container_name: prisma_migrate
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
-    command: npx prisma migrate deploy
-    restart: "no"
-
   admin-service:
     build:
       context: ./services/adminService
@@ -51,8 +38,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       PORT: 3007
@@ -73,8 +58,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       PORT: 3001
@@ -95,8 +78,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       PORT: 3002
@@ -115,8 +96,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       PORT: 3003
@@ -135,8 +114,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       PORT: 3004
@@ -155,8 +132,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       PORT: 3005
@@ -199,8 +174,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
       REDIS_URL: redis://redis:6379
@@ -218,8 +191,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      prisma-migrate:
-        condition: service_completed_successfully
     command: node dist/workers/videoWorker.js
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
