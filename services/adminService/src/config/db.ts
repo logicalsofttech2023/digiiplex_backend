@@ -9,7 +9,7 @@ import * as schema from "../db/schema.js";
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  throw new Error("DATABASE_URL is not defined in environment variables.");
+  throw new Error("DATABASE_URL is not defined in environment variables.1");
 }
 
 export const pool = new Pool({ connectionString });
