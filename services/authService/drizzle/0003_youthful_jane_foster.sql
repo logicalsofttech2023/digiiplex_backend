@@ -1,1 +1,0 @@
-ALTER TABLE "AuthUser" ADD COLUMN "is_roop" text DEFAULT 'true' NOT NULL;

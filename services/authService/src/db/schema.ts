@@ -1,3 +1,79 @@
+// // tables.ts
+// import { pgTable, uuid, text, boolean, timestamp } from "drizzle-orm/pg-core";
+// import { relations } from "drizzle-orm";
+
+// // ================= USERS =================
+// export const authUsers = pgTable("AuthUser", {
+//   id: uuid("id").defaultRandom().primaryKey(),
+//   phone: text("phone").notNull().unique(),
+//   email: text("email").unique(),
+//   fullName: text("fullName"),
+//   dob: text("dob"),
+//   role: text("role").notNull().default("user"),
+//   otp: text("otp").notNull().default(''),
+//   expiresAt: timestamp("expiresAt").notNull(),
+//   verified: boolean("verified").default(false),
+//   isVerified: boolean("isVerified").default(false),
+//   isActive: boolean("isActive").default(true),
+//   isDeleted: boolean("isDeleted").default(false),
+//   createdAt: timestamp("createdAt").defaultNow().notNull(),
+//   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+// });
+
+// // ================= PROFILES =================
+// export const profiles = pgTable("Profile", {
+//   id: uuid("id").defaultRandom().primaryKey(),
+//   userId: uuid("userId").notNull().references(() => authUsers.id),
+//   profileName: text("profileName").notNull(),
+//   profileImg: text("profileImg"),
+//   createdAt: timestamp("createdAt").defaultNow().notNull(),
+//   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+// });
+
+// // ================= PROFILE LANGUAGES =================
+// export const profileLanguages = pgTable("ProfileLanguage", {
+//   id: uuid("id").defaultRandom().primaryKey(),
+//   profileId: uuid("profileId").notNull().references(() => profiles.id),
+//   languageId: uuid("languageId").notNull(),
+// });
+
+// // ================= PROFILE GENRES =================
+// export const profileGenres = pgTable("ProfileGenre", {
+//   id: uuid("id").defaultRandom().primaryKey(),
+//   profileId: uuid("profileId").notNull().references(() => profiles.id),
+//   genreId: uuid("genreId").notNull(),
+// });
+
+// // ================= RELATIONS =================
+
+// // AuthUser -> Profiles
+// export const authUsersRelations = relations(authUsers, ({ many }) => ({
+//   profiles: many(profiles),
+// }));
+
+// // Profile -> ProfileLanguages + ProfileGenres
+// export const profilesRelations = relations(profiles, ({ many }) => ({
+//   profileLanguages: many(profileLanguages),
+//   profileGenres: many(profileGenres),
+// }));
+
+// // ProfileLanguage -> Profile
+// export const profileLanguagesRelations = relations(profileLanguages, ({ one }) => ({
+//   profile: one(profiles, {
+//     fields: [profileLanguages.profileId],
+//     references: [profiles.id],
+//   }),
+// }));
+
+// // ProfileGenre -> Profile
+// export const profileGenresRelations = relations(profileGenres, ({ one }) => ({
+//   profile: one(profiles, {
+//     fields: [profileGenres.profileId],
+//     references: [profiles.id],
+//   }),
+// }));
+
+
 import { relations, sql } from "drizzle-orm";
 import {
   decimal,
