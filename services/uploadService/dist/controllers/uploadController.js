@@ -8,7 +8,7 @@ import { videoQueue } from "../config/queue.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { buildS3FileUrl, extractKeyFromUrl } from "../utils/storagePath.js";
+import { buildS3FileUrl, buildCdnFileUrl, extractKeyFromUrl } from "../utils/storagePath.js";
 import { casts, movieStatusEnum, movies, videoQualities, videos } from "../db/schema.js";
 const getMovieAggregate = async (where, qualityOrder = "createdAt") => {
     const movie = where.id
@@ -71,7 +71,7 @@ const hydrateMovies = async () => {
     return results;
 };
 export const createMovieUpload = asyncHandler(async (req, res) => {
-    const { title, shortDescription, description, slug, genres: rawGenres, language, releaseYear, ageRating, duration, rating, cast, } = req.body;
+    const { title, shortDescription, description, slug, genres: rawGenres, language, releaseYear, ageRating, duration, rating, } = req.body;
     if (!title ||
         !description ||
         !slug ||
@@ -109,12 +109,6 @@ export const createMovieUpload = asyncHandler(async (req, res) => {
             updatedAt: new Date(),
         })
             .returning();
-        if (cast && Array.isArray(cast) && cast.length > 0) {
-            await tx.insert(casts).values(cast.map((name) => ({
-                movieId: createdMovie.id,
-                name,
-            })));
-        }
         return createdMovie;
     });
     const createMultipart = async (type) => {
@@ -142,7 +136,7 @@ export const createMovieUpload = asyncHandler(async (req, res) => {
         const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3000 });
         return {
             uploadUrl,
-            fileUrl: buildS3FileUrl(key),
+            fileUrl: buildCdnFileUrl(key),
             key,
         };
     };

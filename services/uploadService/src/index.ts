@@ -25,5 +25,5 @@ app.use("/upload", uploadRoutes)
 app.use(errorMiddleware);
 
 app.listen(PORT, () => {
-  console.log(`upload Service running on ${PORT}`);
+  console.log(`upload Service running on1 ${PORT}`);
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "AuthUser" DROP COLUMN "is_roop";

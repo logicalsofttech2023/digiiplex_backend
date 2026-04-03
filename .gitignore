@@ -7,3 +7,4 @@
 /services/uploadService/node_modules
 /services/userService/node_modules
 /services/videoService/node_modules
+/packages/db/node_modules

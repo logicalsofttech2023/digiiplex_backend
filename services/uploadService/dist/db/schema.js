@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { decimal, integer, pgEnum, pgTable, text, timestamp, uuid, } from "drizzle-orm/pg-core";
 export const movieStatusEnum = pgEnum("MovieStatus", [
     "PENDING",
@@ -7,7 +7,7 @@ export const movieStatusEnum = pgEnum("MovieStatus", [
 ]);
 export const videoTypeEnum = pgEnum("VideoType", ["MOVIE", "TRAILER"]);
 export const movies = pgTable("Movie", {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: uuid("id").default(sql `gen_random_uuid()`).primaryKey(),
     title: text("title").notNull(),
     description: text("description").notNull(),
     shortDescription: text("shortDescription"),
@@ -20,7 +20,7 @@ export const movies = pgTable("Movie", {
     videoUrl: text("videoUrl"),
     trailerUrl: text("trailerUrl"),
     duration: integer("duration").notNull(),
-    rating: decimal("rating", { precision: 2, scale: 1 }),
+    rating: decimal("rating", { precision: 3, scale: 1 }),
     totalViews: integer("totalViews").notNull().default(0),
     likes: integer("likes").notNull().default(0),
     status: movieStatusEnum("status").notNull().default("PENDING"),
@@ -28,14 +28,14 @@ export const movies = pgTable("Movie", {
     updatedAt: timestamp("updatedAt", { withTimezone: false }).defaultNow().notNull(),
 });
 export const casts = pgTable("Cast", {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: uuid("id").default(sql `gen_random_uuid()`).primaryKey(),
     name: text("name").notNull(),
     movieId: uuid("movieId")
         .notNull()
         .references(() => movies.id, { onDelete: "cascade" }),
 });
 export const videos = pgTable("Video", {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: uuid("id").default(sql `gen_random_uuid()`).primaryKey(),
     movieId: uuid("movieId")
         .notNull()
         .references(() => movies.id, { onDelete: "cascade" }),
@@ -45,7 +45,7 @@ export const videos = pgTable("Video", {
     createdAt: timestamp("createdAt", { withTimezone: false }).defaultNow().notNull(),
 });
 export const videoQualities = pgTable("VideoQuality", {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: uuid("id").default(sql `gen_random_uuid()`).primaryKey(),
     videoId: uuid("videoId")
         .notNull()
         .references(() => videos.id, { onDelete: "cascade" }),

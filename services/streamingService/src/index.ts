@@ -2,16 +2,21 @@ import express from "express";
 import type { Request, Response } from "express";
 import dotenv from "dotenv";
 import { sql } from "drizzle-orm";
-import { db } from "./config/db.js";
-
+import { connectPostgresDB } from "./config/db.js";
 dotenv.config();
+import { db, subscription } from "@digiiplex6112/db";
+ 
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3005;
 
 app.use(express.json());
+await connectPostgresDB();
 
-app.get("/", (_req: Request, res: Response) => {
+
+
+app.get("/", async (_req: Request, res: Response) => {
+  await db.insert(subscription).values({ userId: "user1", plan: "premium" });
   res.json({ service: "Streaming Service running" });
 });
 
@@ -22,7 +27,6 @@ app.get("/play", (_req: Request, res: Response) => {
 });
 
 app.get("/health", async (_req: Request, res: Response) => {
-  await db.execute(sql`SELECT 1`);
   res.json({ ok: true, service: "streaming-service" });
 });
 

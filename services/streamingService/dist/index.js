@@ -1,12 +1,14 @@
 import express from "express";
 import dotenv from "dotenv";
-import { sql } from "drizzle-orm";
-import { db } from "./config/db.js";
+import { connectPostgresDB } from "./config/db.js";
 dotenv.config();
+import { db, test } from "@digiiplex6112/db";
 const app = express();
 const PORT = Number(process.env.PORT) || 3005;
 app.use(express.json());
-app.get("/", (_req, res) => {
+await connectPostgresDB();
+app.get("/", async (_req, res) => {
+    await db.insert(test).values({ name: "Suraj" });
     res.json({ service: "Streaming Service running" });
 });
 app.get("/play", (_req, res) => {
@@ -15,7 +17,6 @@ app.get("/play", (_req, res) => {
     });
 });
 app.get("/health", async (_req, res) => {
-    await db.execute(sql `SELECT 1`);
     res.json({ ok: true, service: "streaming-service" });
 });
 app.listen(PORT, () => {

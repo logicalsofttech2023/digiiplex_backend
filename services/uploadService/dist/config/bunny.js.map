@@ -1,0 +1,1 @@
+{"version":3,"file":"bunny.js","sourceRoot":"","sources":["../../src/config/bunny.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,SAAS,EAAE,MAAM,0BAA0B,CAAC;AAGrD,MAAM,CAAC,MAAM,KAAK,GAAG;IACnB,OAAO,EAAE,SAAS,CAAC,OAAO;IAC1B,aAAa,EAAE,SAAS,CAAC,aAAa;IACtC,aAAa,EAAE,SAAS,CAAC,kBAAkB;CAC5C,CAAC"}

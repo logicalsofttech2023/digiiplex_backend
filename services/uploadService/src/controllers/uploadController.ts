@@ -17,7 +17,7 @@ import { videoQueue } from "../config/queue.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { buildS3FileUrl, extractKeyFromUrl } from "../utils/storagePath.js";
+import { buildS3FileUrl, buildCdnFileUrl, extractKeyFromUrl } from "../utils/storagePath.js";
 import { casts, movieStatusEnum, movies, videoQualities, videos } from "../db/schema.js";
 
 type MovieRow = typeof movies.$inferSelect;
@@ -112,7 +112,6 @@ export const createMovieUpload = asyncHandler(async (req: Request, res: Response
     ageRating,
     duration,
     rating,
-    cast,
   } = req.body;
 
   if (
@@ -161,15 +160,6 @@ export const createMovieUpload = asyncHandler(async (req: Request, res: Response
       })
       .returning();
 
-    if (cast && Array.isArray(cast) && cast.length > 0) {
-      await tx.insert(casts).values(
-        cast.map((name: string) => ({
-          movieId: createdMovie.id,
-          name,
-        })),
-      );
-    }
-
     return createdMovie;
   });
 
@@ -203,7 +193,7 @@ export const createMovieUpload = asyncHandler(async (req: Request, res: Response
 
     return {
       uploadUrl,
-      fileUrl: buildS3FileUrl(key),
+      fileUrl: buildCdnFileUrl(key),
       key,
     };
   };

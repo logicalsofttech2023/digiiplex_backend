@@ -9,7 +9,7 @@ import { connection } from "../config/queue.js";
 import { db } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { S3_CREDENTIAL } from "../constants/constant.js";
-import { buildProcessingAssetPrefix, buildS3FileUrl } from "../utils/storagePath.js";
+import { buildProcessingAssetPrefix, buildS3FileUrl, buildCdnFileUrl } from "../utils/storagePath.js";
 import { movies, videoQualities, videos } from "../db/schema.js";
 
 const renditions = [
@@ -136,16 +136,19 @@ const getContentType = (filePath: string) =>
 const worker = new Worker(
   "video-processing",
   async (job) => {
+    console.log("🚀 Job started:", job.id, job.data);
     const { videoUrl, movieId, sourceKey, assetType } = job.data;
     const tempDir = path.join("tmp", movieId, assetType);
     const inputPath = path.join(tempDir, "input.mp4");
     ensureDir(tempDir);
+    console.log("📁 Temp dir created:", tempDir);
 
     const updateProgress = async (
       stage: string,
       percent: number,
       extra: Record<string, unknown> = {},
     ) => {
+      console.log(`📊 Progress: ${stage} - ${percent}%`, extra);
       await job.updateProgress({ stage, percent, ...extra });
     };
 
@@ -153,6 +156,8 @@ const worker = new Worker(
       await updateProgress("downloading", 0, {
         message: "Downloading video...",
       });
+
+      console.log("⬇️ Downloading video:", videoUrl);
 
       const response = await axios({
         url: videoUrl,
@@ -166,6 +171,8 @@ const worker = new Worker(
         writer.on("error", reject);
       });
 
+      console.log("✅ Download completed:", inputPath);
+
       await updateProgress("downloading", 5, {
         message: "Download complete",
       });
@@ -177,6 +184,8 @@ const worker = new Worker(
 
       for (let index = 0; index < totalRenditions; index += 1) {
         const rendition = renditions[index];
+
+        console.log(`🎬 Transcoding started: ${rendition.label}`);
         const startPercent = Math.round(transcodeStart + index * perRendition);
 
         await updateProgress("transcoding", startPercent, {
@@ -192,6 +201,8 @@ const worker = new Worker(
           rendition,
         );
 
+        console.log(`✅ Transcoding completed: ${rendition.label}`);
+
         const donePercent = Math.round(
           transcodeStart + (index + 1) * perRendition,
         );
@@ -202,6 +213,8 @@ const worker = new Worker(
           message: `${rendition.label} complete`,
         });
       }
+
+      console.log("📄 Creating master playlist")
 
       const masterPlaylistPath = path.join(tempDir, "master.m3u8");
       const masterPlaylist = [
@@ -215,10 +228,14 @@ const worker = new Worker(
       ].join("\n");
       fs.writeFileSync(masterPlaylistPath, masterPlaylist);
 
+      console.log("✅ Master playlist created");
+
       const files = collectFiles(tempDir);
       const uploadableFiles = files.filter(
         (file) => file.endsWith(".ts") || file.endsWith(".m3u8"),
       );
+
+      console.log("📦 Total files to upload:", uploadableFiles.length);
       const processingPrefix = buildProcessingAssetPrefix(sourceKey, assetType);
       const totalFiles = uploadableFiles.length;
       let playlistUrl = "";
@@ -228,6 +245,8 @@ const worker = new Worker(
         const fileBuffer = fs.readFileSync(file);
         const relativePath = path.relative(tempDir, file).replace(/\\/g, "/");
         const key = `${processingPrefix}/${relativePath}`;
+
+        console.log(`☁️ Uploading: ${relativePath}`);
 
         await s3.send(
           new PutObjectCommand({
@@ -241,8 +260,12 @@ const worker = new Worker(
         );
 
         if (relativePath === "master.m3u8") {
-          playlistUrl = buildS3FileUrl(key);
+          playlistUrl = buildCdnFileUrl(key);
         }
+
+        console.log("✅ Upload completed");
+
+        console.log("🗄️ Updating database");
 
         const uploadPercent = Math.round(85 + ((index + 1) / totalFiles) * 13);
         await updateProgress("uploading", uploadPercent, {
@@ -276,6 +299,9 @@ const worker = new Worker(
         })
         .returning();
 
+
+        console.log("🎥 Video record inserted:", video.id);
+
       const baseUrl = playlistUrl.replace("master.m3u8", "");
 
       await db.insert(videoQualities).values(
@@ -287,13 +313,23 @@ const worker = new Worker(
         })),
       );
 
+
+      console.log("📊 Video qualities saved");
+
       await updateProgress("completed", 100, {
         message: "Processing complete!",
         playlistUrl,
       });
 
+
+      console.log("🎉 Job completed successfully:", playlistUrl);
+
       return { success: true, playlistUrl };
+    } catch (error) {
+      console.error("❌ Job failed:", error);
+      throw error;
     } finally {
+      console.log("🧹 Cleaning temp folder:", tempDir);
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   },

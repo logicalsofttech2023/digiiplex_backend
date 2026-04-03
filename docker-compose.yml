@@ -6,24 +6,24 @@ services:
     ports:
       - "6379:6379"
 
-  postgres:
-    image: postgres:15
-    container_name: postgres_db
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: digiiplex
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d digiiplex"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+  # postgres:
+  #   image: postgres:15
+  #   container_name: postgres_db
+  #   restart: always
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: digiiplex
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d digiiplex"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
+  #     start_period: 10s
 
   admin-service:
     build:
@@ -34,12 +34,12 @@ services:
     ports:
       - "3007:3007"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3007
       REDIS_URL: redis://redis:6379
     env_file:
@@ -54,12 +54,12 @@ services:
     ports:
       - "3001:3001"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3001
       REDIS_URL: redis://redis:6379
     env_file:
@@ -74,12 +74,12 @@ services:
     ports:
       - "3002:3002"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3002
       REDIS_URL: redis://redis:6379
 
@@ -92,12 +92,12 @@ services:
     ports:
       - "3003:3003"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3003
       REDIS_URL: redis://redis:6379
 
@@ -110,12 +110,12 @@ services:
     ports:
       - "3004:3004"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3004
       REDIS_URL: redis://redis:6379
 
@@ -128,12 +128,12 @@ services:
     ports:
       - "3005:3005"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3005
       REDIS_URL: redis://redis:6379
 
@@ -170,12 +170,12 @@ services:
     ports:
       - "3006:3006"
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       REDIS_URL: redis://redis:6379
     env_file:
       - ./services/uploadService/.env
@@ -187,14 +187,15 @@ services:
     container_name: video_worker
     restart: always
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       redis:
         condition: service_started
     command: node dist/workers/videoWorker.js
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/digiiplex
+      DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       REDIS_URL: redis://redis:6379
+      IS_WORKER: "true"
     env_file:
       - ./services/uploadService/.env
 

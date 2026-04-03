@@ -1,0 +1,1 @@
+ALTER TABLE "AuthUser" RENAME COLUMN "isActive" TO "is_roop";

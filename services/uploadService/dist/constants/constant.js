@@ -55,4 +55,9 @@ export const S3_CREDENTIAL = {
     S3_SECRET_KEY: requiredEnv(process.env.S3_SECRET_KEY, "S3_SECRET_KEY"),
     S3_BUCKET: requiredEnv(process.env.S3_BUCKET, "S3_BUCKET"),
 };
+export const BUNNY_CDN = {
+    API_KEY: requiredEnv(process.env.BUNNY_API_KEY, "BUNNY_API_KEY"),
+    VIDEO_CDN_URL: requiredEnv(process.env.BUNNY_VIDEO_CDN_URL, "BUNNY_VIDEO_CDN_URL"),
+    VIDEO_PULL_ZONE_ID: requiredEnv(process.env.BUNNY_VIDEO_PULL_ZONE_ID, "BUNNY_VIDEO_PULL_ZONE_ID"),
+};
 //# sourceMappingURL=constant.js.map
