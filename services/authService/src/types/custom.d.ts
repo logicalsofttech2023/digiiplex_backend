@@ -1,7 +1,5 @@
 // types/custom.d.ts
 
-import { Request } from "express";
-
 declare module "cors";
 declare module "nodemailer";
 
@@ -17,20 +15,16 @@ declare module "multer-s3" {
 
 declare global {
   namespace Express {
+    namespace Multer {
+      interface File {
+        location?: string;
+      }
+    }
+
     interface Request {
       user?: {
         id: string;
         role: string;
-        [key: string]: any;
-      };
-      file?: {
-        location: string;
-        originalname: string;
-        fieldname?: string;
-        encoding?: string;
-        mimetype?: string;
-        size?: number;
-        buffer?: Buffer;
         [key: string]: any;
       };
       files?:
