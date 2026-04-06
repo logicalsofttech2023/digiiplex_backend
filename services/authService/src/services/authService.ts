@@ -23,7 +23,7 @@ export const AuthService = {
         .set({
           otp: otp,
           expiresAt: expiresAt,
-          verified: false,
+          isVerified: false,
           updatedAt: new Date(),
         })
         .where(eq(authUsers.phone, phone));
@@ -33,7 +33,6 @@ export const AuthService = {
         phone: phone,
         otp: otp,
         expiresAt: expiresAt,
-        verified: false,
         isVerified: false,
         isActive: true,
         isDeleted: false,
@@ -41,7 +40,8 @@ export const AuthService = {
       });
     }
 
-    return { phone,otp };
+    // Don't return OTP in production, only for testing
+    return { phone, otp };
   },
 
   // 2️⃣ Verify OTP
@@ -49,7 +49,7 @@ export const AuthService = {
     const user = await db.query.authUsers.findFirst({
       where: and(
         eq(authUsers.phone, phone),
-        eq(authUsers.verified, false),
+        eq(authUsers.isVerified, false),
         eq(authUsers.isDeleted, false)
       ),
     });
@@ -62,7 +62,7 @@ export const AuthService = {
       throw new ApiError(400, "Invalid OTP");
     }
 
-    if (new Date() > user.expiresAt) {
+    if (new Date() > user.expiresAt!) {
       throw new ApiError(400, "OTP expired");
     }
 
@@ -70,7 +70,6 @@ export const AuthService = {
     const [updatedUser] = await db
       .update(authUsers)
       .set({
-        verified: true,
         isVerified: true,
         updatedAt: new Date(),
       })
@@ -140,14 +139,17 @@ export const AuthService = {
   },
 
   // 4️⃣ Get All Profiles of a User
-async getProfiles(userId: string) {
-  const allProfiles = await db.query.profiles.findMany({
-    where: eq(profiles.userId, userId),
-    with: { profileLanguages: true, profileGenres: true },
-  });
+  async getProfiles(userId: string) {
+    const allProfiles = await db.query.profiles.findMany({
+      where: eq(profiles.userId, userId),
+      with: { 
+        profileLanguages: true, 
+        profileGenres: true 
+      },
+    });
 
-  return allProfiles;
-},
+    return allProfiles;
+  },
 
   // 5️⃣ Get Single Profile with Languages & Genres
   async getProfile(profileId: string) {

@@ -48,17 +48,18 @@ export const createProfileWithDetails = asyncHandler(async (req, res: Response) 
   const userId = req.user.id;
   const { fullName, email, dob, profileName } = req.body;
 
-  if (!fullName || !profileName || !email ||!dob) {
+  // Validation - only required fields
+  if (!fullName || !profileName) {
     throw new ApiError(
       HTTP_STATUS.BAD_REQUEST,
-      "fullName and profileName ,email,dob are required"
+      "fullName and profileName are required"
     );
   }
 
   const result = await AuthService.createProfileWithDetails(userId, {
     fullName,
-    email,
-    dob,
+    email,      // optional
+    dob,        // optional
     profileName,
     profileImg: req.file?.location, // optional: agar file upload ho to
   });
@@ -70,7 +71,6 @@ export const createProfileWithDetails = asyncHandler(async (req, res: Response) 
 
 // ✅ 4. Get All Profiles of User
 export const getProfiles = asyncHandler(async (req, res: Response) => {
-
   if (!req.user) {
     throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
   }
@@ -192,3 +192,4 @@ export const getUser = asyncHandler(async (req, res: Response) => {
 
   return res.json(new ApiResponse(200, "User fetched successfully", user));
 });
+

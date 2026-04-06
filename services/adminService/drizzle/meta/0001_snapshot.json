@@ -1,12 +1,12 @@
 {
-  "id": "f0f35592-c6ce-4e1b-a7b2-493ef8115f40",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "9ba44b78-2514-4873-9559-7907287955cb",
+  "prevId": "f0f35592-c6ce-4e1b-a7b2-493ef8115f40",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.Admin": {
+    "admin_service.Admin": {
       "name": "Admin",
-      "schema": "",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -40,15 +40,15 @@
           "notNull": true,
           "default": "'admin'"
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
@@ -71,9 +71,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.Creator": {
+    "admin_service.Creator": {
       "name": "Creator",
-      "schema": "",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -107,34 +107,34 @@
           "notNull": false,
           "default": "'creator'"
         },
-        "emailVerified": {
-          "name": "emailVerified",
+        "email_verified": {
+          "name": "email_verified",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
         },
-        "emailVerificationToken": {
-          "name": "emailVerificationToken",
+        "email_verification_token": {
+          "name": "email_verification_token",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "emailVerificationExpires": {
-          "name": "emailVerificationExpires",
+        "email_verification_expires": {
+          "name": "email_verification_expires",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
@@ -157,9 +157,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.Genre": {
+    "admin_service.Genre": {
       "name": "Genre",
-      "schema": "",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -180,22 +180,22 @@
           "primaryKey": false,
           "notNull": true
         },
-        "isActive": {
-          "name": "isActive",
+        "is_active": {
+          "name": "is_active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": true
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
@@ -218,9 +218,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.Language": {
+    "admin_service.Language": {
       "name": "Language",
-      "schema": "",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -241,22 +241,22 @@
           "primaryKey": false,
           "notNull": true
         },
-        "isActive": {
-          "name": "isActive",
+        "is_active": {
+          "name": "is_active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": true
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
@@ -281,7 +281,9 @@
     }
   },
   "enums": {},
-  "schemas": {},
+  "schemas": {
+    "admin_service": "admin_service"
+  },
   "sequences": {},
   "roles": {},
   "policies": {},

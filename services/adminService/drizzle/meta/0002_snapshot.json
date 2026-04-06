@@ -1,12 +1,12 @@
 {
-  "id": "f0f35592-c6ce-4e1b-a7b2-493ef8115f40",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "7059d844-f895-4dfa-a3d3-e0c74c57f865",
+  "prevId": "9ba44b78-2514-4873-9559-7907287955cb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.Admin": {
-      "name": "Admin",
-      "schema": "",
+    "admin_service.admins": {
+      "name": "admins",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -40,40 +40,63 @@
           "notNull": true,
           "default": "'admin'"
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "Admin_email_unique": {
-          "name": "Admin_email_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "admins_email_unique": {
+          "name": "admins_email_unique",
           "columns": [
-            "email"
-          ]
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "admins_email_idx": {
+          "name": "admins_email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.Creator": {
-      "name": "Creator",
-      "schema": "",
+    "admin_service.creators": {
+      "name": "creators",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -107,59 +130,82 @@
           "notNull": false,
           "default": "'creator'"
         },
-        "emailVerified": {
-          "name": "emailVerified",
+        "email_verified": {
+          "name": "email_verified",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
         },
-        "emailVerificationToken": {
-          "name": "emailVerificationToken",
+        "email_verification_token": {
+          "name": "email_verification_token",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "emailVerificationExpires": {
-          "name": "emailVerificationExpires",
+        "email_verification_expires": {
+          "name": "email_verification_expires",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "Creator_email_unique": {
-          "name": "Creator_email_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "creators_email_unique": {
+          "name": "creators_email_unique",
           "columns": [
-            "email"
-          ]
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "creators_email_idx": {
+          "name": "creators_email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.Genre": {
-      "name": "Genre",
-      "schema": "",
+    "admin_service.genres": {
+      "name": "genres",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -180,47 +226,70 @@
           "primaryKey": false,
           "notNull": true
         },
-        "isActive": {
-          "name": "isActive",
+        "is_active": {
+          "name": "is_active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": true
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "Genre_name_unique": {
-          "name": "Genre_name_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "genres_name_unique": {
+          "name": "genres_name_unique",
           "columns": [
-            "name"
-          ]
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "genres_name_idx": {
+          "name": "genres_name_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.Language": {
-      "name": "Language",
-      "schema": "",
+    "admin_service.languages": {
+      "name": "languages",
+      "schema": "admin_service",
       "columns": {
         "id": {
           "name": "id",
@@ -241,47 +310,72 @@
           "primaryKey": false,
           "notNull": true
         },
-        "isActive": {
-          "name": "isActive",
+        "is_active": {
+          "name": "is_active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": true
         },
-        "createdAt": {
-          "name": "createdAt",
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "updatedAt": {
-          "name": "updatedAt",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "Language_name_unique": {
-          "name": "Language_name_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "languages_name_unique": {
+          "name": "languages_name_unique",
           "columns": [
-            "name"
-          ]
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "languages_name_idx": {
+          "name": "languages_name_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
   "enums": {},
-  "schemas": {},
+  "schemas": {
+    "admin_service": "admin_service"
+  },
   "sequences": {},
   "roles": {},
   "policies": {},
