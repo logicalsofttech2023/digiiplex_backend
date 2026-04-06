@@ -1,5 +1,9 @@
 import { Worker } from "bullmq";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import ffmpeg from "fluent-ffmpeg";
 import fs from "fs";
 import path from "path";
@@ -9,7 +13,11 @@ import { connection } from "../config/queue.js";
 import { db } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { S3_CREDENTIAL } from "../constants/constant.js";
-import { buildProcessingAssetPrefix, buildS3FileUrl, buildCdnFileUrl } from "../utils/storagePath.js";
+import {
+  buildProcessingAssetPrefix,
+  buildS3FileUrl,
+  buildCdnFileUrl,
+} from "../utils/storagePath.js";
 import { movies, videoQualities, videos } from "../db/schema.js";
 
 const renditions = [
@@ -133,14 +141,63 @@ const collectFiles = (dirPath: string): string[] => {
 const getContentType = (filePath: string) =>
   filePath.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/MP2T";
 
+const clearDirectory = (dirPath: string) => {
+  if (fs.existsSync(dirPath)) {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  }
+};
+
+const deleteS3FolderByPrefix = async (prefix: string) => {
+  let continuationToken: string | undefined;
+
+  do {
+    const listed = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: S3_CREDENTIAL.S3_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
+
+    const keys =
+      listed.Contents?.map((item) => item.Key).filter((item): item is string =>
+        Boolean(item),
+      ) ?? [];
+
+    if (keys.length) {
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: S3_CREDENTIAL.S3_BUCKET,
+          Delete: {
+            Objects: keys.map((key) => ({ Key: key })),
+          },
+        }),
+      );
+    }
+
+    continuationToken = listed.IsTruncated
+      ? listed.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+};
+
 const worker = new Worker(
   "video-processing",
   async (job) => {
     console.log("🚀 Job started:", job.id, job.data);
     const { videoUrl, movieId, sourceKey, assetType } = job.data;
+    // const tempDir = path.join("tmp", movieId, assetType);
+    // const inputPath = path.join(tempDir, "input.mp4");
+    // ensureDir(tempDir);
+
     const tempDir = path.join("tmp", movieId, assetType);
     const inputPath = path.join(tempDir, "input.mp4");
+    const processingPrefix = buildProcessingAssetPrefix(sourceKey, assetType);
+
+    // Purane crashed run ka local temp folder clean karo
+    clearDirectory(tempDir);
     ensureDir(tempDir);
+
     console.log("📁 Temp dir created:", tempDir);
 
     const updateProgress = async (
@@ -214,7 +271,7 @@ const worker = new Worker(
         });
       }
 
-      console.log("📄 Creating master playlist")
+      console.log("📄 Creating master playlist");
 
       const masterPlaylistPath = path.join(tempDir, "master.m3u8");
       const masterPlaylist = [
@@ -236,7 +293,14 @@ const worker = new Worker(
       );
 
       console.log("📦 Total files to upload:", uploadableFiles.length);
-      const processingPrefix = buildProcessingAssetPrefix(sourceKey, assetType);
+
+      console.log(
+        "🧹 Cleaning old processing files from S3:",
+        processingPrefix,
+      );
+      await deleteS3FolderByPrefix(processingPrefix);
+
+      // const processingPrefix = buildProcessingAssetPrefix(sourceKey, assetType);
       const totalFiles = uploadableFiles.length;
       let playlistUrl = "";
 
@@ -299,8 +363,7 @@ const worker = new Worker(
         })
         .returning();
 
-
-        console.log("🎥 Video record inserted:", video.id);
+      console.log("🎥 Video record inserted:", video.id);
 
       const baseUrl = playlistUrl.replace("master.m3u8", "");
 
@@ -313,14 +376,12 @@ const worker = new Worker(
         })),
       );
 
-
       console.log("📊 Video qualities saved");
 
       await updateProgress("completed", 100, {
         message: "Processing complete!",
         playlistUrl,
       });
-
 
       console.log("🎉 Job completed successfully:", playlistUrl);
 
