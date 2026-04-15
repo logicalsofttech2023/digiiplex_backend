@@ -8,6 +8,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { Users } from "../../index.js";
 
 export const adminService = pgSchema("admin_service");
 
@@ -16,12 +17,9 @@ export const genres = adminService.table(
   "genres",
   {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
-
     name: text("name").notNull(),
     image: text("image").notNull(),
-
     isActive: boolean("is_active").notNull().default(true),
-
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -36,7 +34,6 @@ export const languages = adminService.table(
   "languages",
   {
     id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
-
     name: text("name").notNull(),
     image: text("image").notNull(),
 

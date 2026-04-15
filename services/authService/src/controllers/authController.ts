@@ -15,7 +15,6 @@ import {
 import { deleteFromS3 } from "../utils/s3Delete.js";
 import { db, Users, profiles, genres, languages } from "@digiiplex6112/db";
 
-
 // ================= OTP GENERATE =================
 export const generateOTP = asyncHandler(async (req: Request, res: Response) => {
   const { phone } = req.body;
@@ -75,7 +74,6 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid or expired OTP");
   }
 
-  // 🔹 UPDATE USER
   const [updatedUser] = await db
     .update(Users)
     .set({
@@ -93,60 +91,97 @@ export const verifyOTP = asyncHandler(async (req: Request, res: Response) => {
       isVerified: Users.isVerified,
     });
 
-  // 🔥 🔹 PROFILE CHECK (IMPORTANT)
   const existingProfile = await db
     .select({ id: profiles.id })
     .from(profiles)
     .where(eq(profiles.userId, updatedUser.id))
     .limit(1);
 
-  const hasProfiles = existingProfile.length > 0;
-
-  if (!hasProfiles) {
-    return res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "OTP verified successfully", {
-        user: updatedUser,
-        hasProfiles: false,
-      }),
-    );
-  }
-
-  // ✅ HAS PROFILE → GENERATE TOKENS
   const tokens = await generateTokenPair({
     id: updatedUser.id,
-    role: updatedUser.role,
+    role: updatedUser.role || "USER",
   });
 
   setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
 
+  const hasProfiles = existingProfile.length > 0;
+
   return res.status(HTTP_STATUS.OK).json(
     new ApiResponse(HTTP_STATUS.OK, "OTP verified successfully", {
       user: updatedUser,
-      hasProfiles: true,
+      hasProfiles,
       ...tokens,
     }),
   );
 });
 
-export const refreshToken = asyncHandler(async (req: Request, res: Response) => {
-  const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE] || req.body.refreshToken;
+export const resendOTP = asyncHandler(async (req: Request, res: Response) => {
+  const { phone } = req.body;
 
-  if (!refreshToken) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Refresh token is required");
+  if (!phone) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Phone number is required");
   }
 
-  const payload = await verifyRefreshToken(refreshToken);
-  const tokens = await generateTokenPair({
-    id: payload.id,
-    role: payload.role,
-  });
+  // 🔹 Check user exists
+  const [existingUser] = await db
+    .select({ id: Users.id })
+    .from(Users)
+    .where(eq(Users.phone, phone))
+    .limit(1);
 
-  setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+  if (!existingUser) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found");
+  }
+
+  // 🔹 Generate new OTP
+  const otp = crypto.randomInt(1000, 9999).toString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+  // 🔹 Update OTP
+  await db
+    .update(Users)
+    .set({
+      otp,
+      expiresAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(Users.phone, phone));
 
   return res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Tokens refreshed successfully", tokens),
+    new ApiResponse(HTTP_STATUS.OK, "OTP resent successfully", {
+      otp,
+    }),
   );
 });
+
+export const refreshToken = asyncHandler(
+  async (req: Request, res: Response) => {
+    const refreshToken =
+      req.cookies?.[REFRESH_TOKEN_COOKIE] || req.body.refreshToken;
+
+    if (!refreshToken) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Refresh token is required");
+    }
+
+    const payload = await verifyRefreshToken(refreshToken);
+    const tokens = await generateTokenPair({
+      id: payload.id,
+      role: payload.role,
+    });
+
+    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(
+        new ApiResponse(
+          HTTP_STATUS.OK,
+          "Tokens refreshed successfully",
+          tokens,
+        ),
+      );
+  },
+);
 
 export const logout = asyncHandler(async (_req: Request, res: Response) => {
   clearAuthCookies(res);
@@ -203,13 +238,13 @@ export const createProfile = asyncHandler(
       if (!email) {
         throw new ApiError(
           HTTP_STATUS.BAD_REQUEST,
-          "Email is required for the first profile"
+          "Email is required for the first profile",
         );
       }
       if (!dob) {
         throw new ApiError(
           HTTP_STATUS.BAD_REQUEST,
-          "Date of birth is required for the first profile"
+          "Date of birth is required for the first profile",
         );
       }
 
@@ -246,10 +281,10 @@ export const createProfile = asyncHandler(
           isFirstProfile
             ? "First profile created successfully"
             : "Profile created successfully",
-          newProfile
-        )
+          newProfile,
+        ),
       );
-  }
+  },
 );
 
 // ================= GET PROFILES =================
@@ -281,25 +316,31 @@ export const getGenres = asyncHandler(async (_req: Request, res: Response) => {
   }
   return res
     .status(HTTP_STATUS.OK)
-    .json(new ApiResponse(HTTP_STATUS.OK, "Genres fetched successfully", allGenres));
+    .json(
+      new ApiResponse(HTTP_STATUS.OK, "Genres fetched successfully", allGenres),
+    );
 });
 
-
-
-export const getLanguages = asyncHandler(async (_req: Request, res: Response) => {
-  if (!languages) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Languages table not found");
-  }
-  const allLanguages = await db
-    .select()
-    .from(languages)
-    .orderBy(asc(languages.name));
-  if (!allLanguages || allLanguages.length === 0) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "No languages found");
-  }
-  return res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Languages fetched successfully", allLanguages),
-  );
-});
-
-
+export const getLanguages = asyncHandler(
+  async (_req: Request, res: Response) => {
+    if (!languages) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Languages table not found");
+    }
+    const allLanguages = await db
+      .select()
+      .from(languages)
+      .orderBy(asc(languages.name));
+    if (!allLanguages || allLanguages.length === 0) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "No languages found");
+    }
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(
+        new ApiResponse(
+          HTTP_STATUS.OK,
+          "Languages fetched successfully",
+          allLanguages,
+        ),
+      );
+  },
+);

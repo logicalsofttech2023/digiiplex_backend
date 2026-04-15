@@ -18,6 +18,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1016.0",
     "@digiiplex6112/db": "file:../../packages/db",
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.71.1",
     "cors": "^2.8.6",
@@ -32,6 +34,7 @@
     "multer": "^2.1.1",
     "multer-s3": "^3.0.1",
     "nodemailer": "^8.0.4",
+    "paseto": "^3.1.4",
     "pd": "^0.8.1",
     "pg": "^8.20.0",
     "tsx": "^4.21.0",
