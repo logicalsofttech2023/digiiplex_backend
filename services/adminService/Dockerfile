@@ -16,6 +16,7 @@ COPY packages/db/dist ./packages/db/dist
 RUN npm ci --workspace adminservice --no-audit
 
 COPY services/adminService ./services/adminService
+COPY packages/proto ./packages/proto
 
 WORKDIR /workspace/services/adminService
 RUN npm run build

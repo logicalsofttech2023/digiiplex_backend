@@ -21,7 +21,7 @@ export const validate = (schemas: SchemaType) => {
         });
       }
 
-      req.body = value;
+      Object.assign(req.body, value);
     }
 
     if (schemas.query) {
@@ -36,7 +36,7 @@ export const validate = (schemas: SchemaType) => {
         });
       }
 
-      req.query = value as any;
+      Object.assign(req.query, value);
     }
 
     if (schemas.params) {
@@ -51,7 +51,7 @@ export const validate = (schemas: SchemaType) => {
         });
       }
 
-      req.params = value;
+      Object.assign(req.params, value);
     }
 
     next();
