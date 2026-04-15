@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package keys;
+
+service KeyService {
+  rpc GetActiveKey (Empty) returns (ActiveKeyResponse);
+  rpc GetPublicKeys (Empty) returns (PublicKeysResponse);
+}
+
+message Empty {}
+
+message ActiveKeyResponse {
+  string kid = 1;
+  string publicKey = 2;
+  string privateKey = 3;
+}
+
+message PublicKey {
+  string kid = 1;
+  string publicKey = 2;
+}
+
+message PublicKeysResponse {
+  repeated PublicKey keys = 1;
+}

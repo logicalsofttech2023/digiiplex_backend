@@ -1,8 +1,15 @@
 {
   "name": "@digiiplex6112/db",
   "version": "1.0.5",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -12,16 +19,16 @@
   "scripts": {
     "build": "tsc"
   },
-  "peerDependencies": {
+  "dependencies": {
     "drizzle-orm": ">=0.44.0",
     "pg": ">=8.0.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
-    "@types/pg": "^8.20.0",
-    "drizzle-kit": "^0.31.10",
-    "drizzle-orm": "^0.45.2",
-    "pg": "^8.20.0",
-    "typescript": "^6.0.2"
+    "@types/pg": "^8.15.5",
+    "drizzle-kit": "^0.31.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

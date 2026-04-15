@@ -2,3 +2,5 @@
 .vs
 **/node_modules
 **/dist
+!packages/db/dist
+!packages/db/dist/**

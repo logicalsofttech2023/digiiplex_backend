@@ -140,7 +140,6 @@ CREATE TABLE "VideoQuality" (
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-DROP TABLE "Test" CASCADE;--> statement-breakpoint
 ALTER TABLE "Cast" ADD CONSTRAINT "Cast_movieId_Movie_id_fk" FOREIGN KEY ("movieId") REFERENCES "public"."Movie"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "Profile" ADD CONSTRAINT "Profile_userId_AuthUser_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."AuthUser"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ProfileGenre" ADD CONSTRAINT "ProfileGenre_profileId_Profile_id_fk" FOREIGN KEY ("profileId") REFERENCES "public"."Profile"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

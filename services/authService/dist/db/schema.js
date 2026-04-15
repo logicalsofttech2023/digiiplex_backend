@@ -1,16 +1,30 @@
-import { pgSchema, uuid, text, boolean, timestamp, index, uniqueIndex, } from "drizzle-orm/pg-core";
-import { sql, relations } from "drizzle-orm";
+import { pgSchema, uuid, text, boolean, timestamp, index, uniqueIndex, pgEnum, } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 export const authService = pgSchema("auth_service");
+export const roleEnum = pgEnum("role", [
+    "USER",
+    "CREATOR",
+    "ADMIN",
+    "SUPER_ADMIN",
+]);
+export const profileRoleEnum = pgEnum("profile_role", [
+    "ADULT",
+    "KID",
+    "TEEN",
+    "SENIOR",
+]);
+export const providerEnum = pgEnum("auth_provider", ['EMAIL', 'GOOGLE', 'FACEBOOK', 'APPLE', 'PHONE']);
+export const deviceTypeEnum = pgEnum("device_type", ['MOBILE', 'WEB', 'TV', 'TABLET', 'CONSOLE', 'UNKNOWN']);
 // ================= USERS =================
-export const authUsers = authService.table("auth_users", {
+export const Users = authService.table("auth_users", {
     id: uuid("id")
         .default(sql `gen_random_uuid()`)
         .primaryKey(),
     phone: text("phone").notNull(),
     email: text("email"),
-    fullName: text("full_name"),
+    auth_provider: providerEnum("auth_provider").notNull().default("PHONE"),
     dob: text("dob"),
-    role: text("role").notNull().default("user"),
+    role: roleEnum("role").notNull().default("USER"),
     otp: text("otp"),
     expiresAt: timestamp("expires_at"),
     isVerified: boolean("is_verified").default(false),
@@ -31,64 +45,16 @@ export const profiles = authService.table("profiles", {
         .primaryKey(),
     userId: uuid("user_id")
         .notNull()
-        .references(() => authUsers.id, { onDelete: "cascade" }),
+        .references(() => Users.id, { onDelete: "cascade" }),
     profileName: text("profile_name").notNull(),
     profileImg: text("profile_img"),
+    profile_role: profileRoleEnum("profile_role").notNull().default("ADULT"),
+    device_type: deviceTypeEnum("device_type").notNull().default("UNKNOWN"),
+    genresIds: uuid("genres_ids").array().default([]),
+    languagesIds: uuid("languages_ids").array().default([]),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
     userIdx: index("profiles_user_idx").on(t.userId),
-}));
-// ================= PROFILE LANGUAGES =================
-export const profileLanguages = authService.table("profile_languages", {
-    id: uuid("id")
-        .default(sql `gen_random_uuid()`)
-        .primaryKey(),
-    profileId: uuid("profile_id")
-        .notNull()
-        .references(() => profiles.id, { onDelete: "cascade" }),
-    languageId: uuid("language_id").notNull(),
-}, (t) => ({
-    profileIdx: index("pl_profile_idx").on(t.profileId),
-}));
-// ================= PROFILE GENRES =================
-export const profileGenres = authService.table("profile_genres", {
-    id: uuid("id")
-        .default(sql `gen_random_uuid()`)
-        .primaryKey(),
-    profileId: uuid("profile_id")
-        .notNull()
-        .references(() => profiles.id, { onDelete: "cascade" }),
-    genreId: uuid("genre_id").notNull(),
-}, (t) => ({
-    profileIdx: index("pg_profile_idx").on(t.profileId),
-}));
-// ================= RELATIONS =================
-// User → Profiles
-export const authUsersRelations = relations(authUsers, ({ many }) => ({
-    profiles: many(profiles),
-}));
-// Profile → User + Languages + Genres
-export const profilesRelations = relations(profiles, ({ one, many }) => ({
-    user: one(authUsers, {
-        fields: [profiles.userId],
-        references: [authUsers.id],
-    }),
-    profileLanguages: many(profileLanguages),
-    profileGenres: many(profileGenres),
-}));
-// ProfileLanguage → Profile
-export const profileLanguagesRelations = relations(profileLanguages, ({ one }) => ({
-    profile: one(profiles, {
-        fields: [profileLanguages.profileId],
-        references: [profiles.id],
-    }),
-}));
-// ProfileGenre → Profile
-export const profileGenresRelations = relations(profileGenres, ({ one }) => ({
-    profile: one(profiles, {
-        fields: [profileGenres.profileId],
-        references: [profiles.id],
-    }),
 }));
 //# sourceMappingURL=schema.js.map

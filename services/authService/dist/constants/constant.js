@@ -6,10 +6,11 @@ const requiredEnv = (value, key) => {
     }
     return value;
 };
-export const PORT = process.env.PORT || 3007;
-export const NODE_ENV = process.env.NODE_ENV || "development";
-export const JWT_SECRET = process.env.JWT_SECRET || "secret";
-export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1d";
+export const PORT = requiredEnv(process.env.PORT, "PORT");
+export const NODE_ENV = requiredEnv(process.env.NODE_ENV, "NODE_ENV");
+export const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+export const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || process.env.JWT_EXPIRES_IN || "7d";
+export const KEY_MANAGEMENT_GRPC_ADDRESS = process.env.KEY_MANAGEMENT_GRPC_ADDRESS || "localhost:50051";
 export const HTTP_STATUS = {
     OK: 200,
     CREATED: 201,
@@ -27,8 +28,8 @@ export const MESSAGES = {
     AUTH: {
         INVALID_CREDENTIALS: "Invalid credentials",
         TOKEN_EXPIRED: "Token expired",
-        OTP_SENT: "OTP sent successfully", // ✅ add this
-        OTP_VERIFIED: "OTP verified successfully", // ✅ add this
+        OTP_SENT: "OTP sent successfully",
+        OTP_VERIFIED: "OTP verified successfully",
     },
     ADMIN: {
         CREATED: "Admin created successfully",

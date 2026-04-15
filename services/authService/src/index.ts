@@ -2,17 +2,27 @@
 import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { sql } from "drizzle-orm";
-import { db } from "./config/db.js";
+import cookieParser from "cookie-parser";
+// import { db } from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
+import { errorMiddleware } from "./middleware/errorMiddleware.js";
+import { PORT } from "./constants/constant.js";
+import { connectPostgresDB, db, Users } from "@digiiplex6112/db";
+
+
 
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3001;
+const port = PORT || 3001;
 
 // Body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+connectPostgresDB();
+
+
 
 // Health check
 app.get("/", (_req: Request, res: Response) => {
@@ -21,27 +31,18 @@ app.get("/", (_req: Request, res: Response) => {
 
 app.get("/health", async (_req: Request, res: Response) => {
   try {
-    await db.execute(sql`SELECT 1`);
     res.json({ ok: true, service: "auth-service" });
   } catch (err) {
     res.status(500).json({ ok: false, error: "Database connection failed" });
   }
 });
 
-
-
 // Routes
 app.use("/auth", authRoutes);
 
-// Global error handler
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err);
-  const status = err.status || 500;
-  const message = err.message || "Internal Server Error";
-  res.status(status).json({ status, message });
-});
+app.use(errorMiddleware);
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`Auth Service running at http://localhost:${PORT}`);
+app.listen(port, () => {
+  console.log(`Auth Service running at http://localhost:${port}`);
 });

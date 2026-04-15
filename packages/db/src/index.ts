@@ -1,3 +1,4 @@
-export * from "./config/db";
-export * from "./schema/index";
-export * from "./schema/relations";
+export * from "./config/db.js";
+export * from "./schema/AuthService/authSchema.js";
+export * from "./schema/AdminService/adminSchema.js";
+

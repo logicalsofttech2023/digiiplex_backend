@@ -89,7 +89,7 @@ pipelines:
           - action:
               serviceEndpoint: authService
               changeOrigin: true
-              stripPath: true
+              
 
   userPipeline:
     apiEndpoints:
@@ -104,7 +104,7 @@ pipelines:
           - action:
               serviceEndpoint: userService
               changeOrigin: true
-              stripPath: true
+              
 
   subscriptionPipeline:
     apiEndpoints:
@@ -119,7 +119,7 @@ pipelines:
           - action:
               serviceEndpoint: subscriptionService
               changeOrigin: true
-              stripPath: true
+              
 
   videoPipeline:
     apiEndpoints:
@@ -134,7 +134,7 @@ pipelines:
           - action:
               serviceEndpoint: videoService
               changeOrigin: true
-              stripPath: true
+              
 
   streamingPipeline:
     apiEndpoints:
@@ -145,8 +145,8 @@ pipelines:
               origin: "*"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
-      - proxy:
+      - proxy: 
           - action:
               serviceEndpoint: streamingService
               changeOrigin: true
-              stripPath: true
+              

@@ -1,43 +1,22 @@
-import express from "express"
-
-import upload from "../middleware/upload.js";
-import { authMiddleware } from "../middleware/authMiddleware.js";
-
-import {
-  sendOtp,
-  verifyOtp,
-  createProfileWithDetails,
-  getProfiles,
-  getProfile,
-  selectLanguages,
-  selectGenres,
-  updateProfile,
-  deleteProfile,
-  getUser,
-} from "../controllers/authController.js";
-
+import express from "express";
 const router = express.Router();
+import * as authController from "../controllers/authController.js";
+import { authMiddleware } from "../middleware/authMiddleware.js";
+import { validate } from "../middleware/validate.js";
+import * as userValidator from "../validators/userValidator.js";
 
-// Public routes
-router.post("/send-otp", sendOtp);
-router.post("/verify-otp", verifyOtp);
+// ===== AUTH =====
+router.post("/otp", validate({ body: userValidator.generateOTPSchema }), authController.generateOTP);
+router.post("/otp/verify", validate({ body: userValidator.verifyOTPSchema }), authController.verifyOTP);
+router.post("/refresh", validate({ body: userValidator.refreshTokenSchema }), authController.refreshToken);
+router.post("/logout", authController.logout);
 
-// Protected routes (require authentication)
-router.use(authMiddleware);
+// ===== PROFILES =====
+router.post("/profiles", validate({ body: userValidator.createProfileSchema }), authMiddleware, authController.createProfile);
+router.get("/profiles", authMiddleware, authController.getProfiles);
 
-// Profile routes
-router.post("/create-profile",  upload("profile").single("profileImg"), createProfileWithDetails);
+router.get("/genres", authController.getGenres);
+router.get("/languages", authController.getLanguages);
 
-router.get("/profiles", getProfiles);
-router.get("/profile/:profileId", getProfile);
-router.put("/profile/:profileId", upload("profile").single("profileImg"), updateProfile);
-router.delete("/profile/:profileId", deleteProfile);
-
-// Language & Genre routes
-router.post("/select-languages", selectLanguages);
-router.post("/select-genres", selectGenres);
-
-// User routes
-router.get("/me", getUser);
 
 export default router;

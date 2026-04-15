@@ -1,20 +1,28 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
 import ApiError from "../utils/ApiError.js";
 import { HTTP_STATUS } from "../constants/constant.js";
+import { verifyAccessToken } from "../utils/jwt.js";
+import { ACCESS_TOKEN_COOKIE } from "../utils/authCookies.js";
 
-export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+export const authMiddleware = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Authorization header missing");
+  const token =
+    req.cookies?.[ACCESS_TOKEN_COOKIE] ||
+    (authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined);
 
-  const token = authHeader.split(" ")[1];
-  if (!token) throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Token missing");
+  if (!token) {
+    throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Token missing");
+  }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string; role: string };
-    req.user = decoded; // ✅ TypeScript ab recognize karega req.user
+    const decoded = await verifyAccessToken(token);
+    req.user = decoded;
     next();
-  } catch (err) {
+  } catch {
     throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid token");
   }
 };

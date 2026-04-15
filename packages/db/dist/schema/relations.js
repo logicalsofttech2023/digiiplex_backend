@@ -1,51 +1,48 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.profileLanguageRelations = exports.profileGenreRelations = exports.authUserRelations = exports.profileRelations = exports.videoQualityRelations = exports.videoRelations = exports.movieRelations = exports.castRelations = void 0;
-const relations_1 = require("drizzle-orm/relations");
-const index_1 = require("./index");
-exports.castRelations = (0, relations_1.relations)(index_1.cast, ({ one }) => ({
-    movie: one(index_1.movie, {
-        fields: [index_1.cast.movieId],
-        references: [index_1.movie.id]
+import { relations } from "drizzle-orm/relations";
+import { movie, cast, video, videoQuality, authUser, profile, profileGenre, profileLanguage } from "./index.js";
+export const castRelations = relations(cast, ({ one }) => ({
+    movie: one(movie, {
+        fields: [cast.movieId],
+        references: [movie.id]
     }),
 }));
-exports.movieRelations = (0, relations_1.relations)(index_1.movie, ({ many }) => ({
-    casts: many(index_1.cast),
-    videos: many(index_1.video),
+export const movieRelations = relations(movie, ({ many }) => ({
+    casts: many(cast),
+    videos: many(video),
 }));
-exports.videoRelations = (0, relations_1.relations)(index_1.video, ({ one, many }) => ({
-    movie: one(index_1.movie, {
-        fields: [index_1.video.movieId],
-        references: [index_1.movie.id]
+export const videoRelations = relations(video, ({ one, many }) => ({
+    movie: one(movie, {
+        fields: [video.movieId],
+        references: [movie.id]
     }),
-    videoQualities: many(index_1.videoQuality),
+    videoQualities: many(videoQuality),
 }));
-exports.videoQualityRelations = (0, relations_1.relations)(index_1.videoQuality, ({ one }) => ({
-    video: one(index_1.video, {
-        fields: [index_1.videoQuality.videoId],
-        references: [index_1.video.id]
-    }),
-}));
-exports.profileRelations = (0, relations_1.relations)(index_1.profile, ({ one, many }) => ({
-    authUser: one(index_1.authUser, {
-        fields: [index_1.profile.userId],
-        references: [index_1.authUser.id]
-    }),
-    profileGenres: many(index_1.profileGenre),
-    profileLanguages: many(index_1.profileLanguage),
-}));
-exports.authUserRelations = (0, relations_1.relations)(index_1.authUser, ({ many }) => ({
-    profiles: many(index_1.profile),
-}));
-exports.profileGenreRelations = (0, relations_1.relations)(index_1.profileGenre, ({ one }) => ({
-    profile: one(index_1.profile, {
-        fields: [index_1.profileGenre.profileId],
-        references: [index_1.profile.id]
+export const videoQualityRelations = relations(videoQuality, ({ one }) => ({
+    video: one(video, {
+        fields: [videoQuality.videoId],
+        references: [video.id]
     }),
 }));
-exports.profileLanguageRelations = (0, relations_1.relations)(index_1.profileLanguage, ({ one }) => ({
-    profile: one(index_1.profile, {
-        fields: [index_1.profileLanguage.profileId],
-        references: [index_1.profile.id]
+export const profileRelations = relations(profile, ({ one, many }) => ({
+    authUser: one(authUser, {
+        fields: [profile.userId],
+        references: [authUser.id]
+    }),
+    profileGenres: many(profileGenre),
+    profileLanguages: many(profileLanguage),
+}));
+export const authUserRelations = relations(authUser, ({ many }) => ({
+    profiles: many(profile),
+}));
+export const profileGenreRelations = relations(profileGenre, ({ one }) => ({
+    profile: one(profile, {
+        fields: [profileGenre.profileId],
+        references: [profile.id]
+    }),
+}));
+export const profileLanguageRelations = relations(profileLanguage, ({ one }) => ({
+    profile: one(profile, {
+        fields: [profileLanguage.profileId],
+        references: [profile.id]
     }),
 }));

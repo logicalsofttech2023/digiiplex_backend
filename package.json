@@ -1,0 +1,12 @@
+{
+  "name": "digiiplex_backend",
+  "private": true,
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.20.0"
+  },
+  "workspaces": [
+    "services/*",
+    "packages/*"
+  ]
+}

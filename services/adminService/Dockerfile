@@ -1,11 +1,23 @@
 FROM node:20
 
-WORKDIR /app
+WORKDIR /workspace
+
+ENV NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
+    NPM_CONFIG_FETCH_TIMEOUT=120000 \
+    NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
 
 COPY package*.json ./
-RUN npm install
+COPY services/adminService/package.json ./services/adminService/package.json
+COPY packages/db/package.json ./packages/db/package.json
+COPY packages/db/dist ./packages/db/dist
 
-COPY . .
+RUN npm ci --workspace adminservice --no-audit
+
+COPY services/adminService ./services/adminService
+
+WORKDIR /workspace/services/adminService
 RUN npm run build
 
 EXPOSE 3007

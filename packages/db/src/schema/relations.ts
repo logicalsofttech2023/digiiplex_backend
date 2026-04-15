@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { movie, cast, video, videoQuality, authUser, profile, profileGenre, profileLanguage } from "./index";
+import { movie, cast, video, videoQuality, authUser, profile, profileGenre, profileLanguage } from "./index.js";
 
 export const castRelations = relations(cast, ({one}) => ({
 	movie: one(movie, {

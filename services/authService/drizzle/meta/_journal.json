@@ -15,6 +15,20 @@
       "when": 1775452894633,
       "tag": "0001_bouncy_stark_industries",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776078585066,
+      "tag": "0002_tearful_fabian_cortez",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776080290355,
+      "tag": "0003_many_mac_gargan",
+      "breakpoints": true
     }
   ]
 }
