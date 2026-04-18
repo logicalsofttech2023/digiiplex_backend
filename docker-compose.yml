@@ -5,6 +5,8 @@ services:
     restart: always
     ports:
       - "6379:6379"
+    networks:
+      - digiplex-network
 
   # postgres:
   #   image: postgres:15
@@ -44,6 +46,8 @@ services:
       REDIS_URL: redis://redis:6379
     env_file:
       - ./services/adminService/.env
+    networks:
+      - digiplex-network
 
   auth-service:
     build:
@@ -62,6 +66,8 @@ services:
       REDIS_URL: redis://redis:6379
     env_file:
       - ./services/authService/.env
+    networks:
+      - digiplex-network
 
   key-management-service:
     build:
@@ -76,6 +82,8 @@ services:
       PORT: 3008
     env_file:
       - ./services/KeyManagementService/.env
+    networks:
+      - digiplex-network
 
   user-service:
     build:
@@ -94,6 +102,10 @@ services:
       DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3002
       REDIS_URL: redis://redis:6379
+    env_file:
+      - ./services/userService/.env
+    networks:
+      - digiplex-network
 
   subscription-service:
     build:
@@ -112,6 +124,9 @@ services:
       DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3003
       REDIS_URL: redis://redis:6379
+    networks:
+      - digiplex-network
+
 
   video-service:
     build:
@@ -130,6 +145,8 @@ services:
       DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3004
       REDIS_URL: redis://redis:6379
+    networks:
+      - digiplex-network
 
   streaming-service:
     build:
@@ -148,6 +165,8 @@ services:
       DATABASE_URL: postgresql://postgres.zydvwzxuybmfinntmntn:yJ7NFtewqL6IRLfN@aws-1-ap-south-1.pooler.supabase.com:6543/postgres
       PORT: 3005
       REDIS_URL: redis://redis:6379
+    networks:
+      - digiplex-network
 
   digiplex-gateway:
     build:
@@ -172,6 +191,8 @@ services:
         condition: service_started
       streaming-service:
         condition: service_started
+    networks:
+      - digiplex-network
 
   upload-service:
     build:
@@ -191,6 +212,8 @@ services:
       REDIS_URL: redis://redis:6379
     env_file:
       - ./services/uploadService/.env
+    networks:
+      - digiplex-network
 
   video-worker:
     build:
@@ -210,6 +233,12 @@ services:
       IS_WORKER: "true"
     env_file:
       - ./services/uploadService/.env
+    networks:
+      - digiplex-network
 
 volumes:
   postgres_data:
+
+networks:
+  digiplex-network:
+    driver: bridge

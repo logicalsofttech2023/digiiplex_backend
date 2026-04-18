@@ -3,16 +3,15 @@ import type { Request, Response } from "express";
 import { PORT } from "./constants/constant.js";
 import adminRouter from "./routes/adminRoutes.js";
 import { errorMiddleware } from "./middleware/errorMiddleware.js";
-import { connectDB, connectPostgresDB } from "./config/db.js";
+// import { connectDB, connectPostgresDB } from "./config/db.js";
 import cors from "cors";
 
 const app = express();
 app.use(express.json());
 
 // connectDB();
-connectPostgresDB();
+// connectPostgresDB();
 
-app.use(cors());
 
 app.get("/", (req: Request, res: Response) => {
   res.json({ service: "Admin Service running" });

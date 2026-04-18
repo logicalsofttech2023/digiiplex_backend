@@ -12,14 +12,21 @@ export const errorMiddleware = (
   let message = "Internal Server Error";
   let errors: unknown[] = [];
 
+
   if (err instanceof ApiError) {
     statusCode = err.statusCode;
     message = err.message;
     errors = err.errors;
-  }
+  } else if (err instanceof Error) {
+    const error = err as any;
 
-  if (err instanceof Error && !(err instanceof ApiError)) {
-    message = err.message;
+    message =
+      error.cause?.message ||
+      error.detail ||
+      error.hint ||
+      error.message;
+
+    console.error("🔥 FULL ERROR:", error);
   }
 
   return res.status(statusCode).json({

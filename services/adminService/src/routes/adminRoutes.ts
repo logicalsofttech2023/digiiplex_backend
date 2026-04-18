@@ -6,22 +6,107 @@ import * as adminValidator from "../validators/adminValidator.js";
 
 const router = express.Router();
 
-router.post("/super-admins", validate({ body: adminValidator.createSuperAdminSchema }), adminController.createSuperAdmin);
-router.post("/super-admins/login", validate({ body: adminValidator.loginSuperAdminSchema }), adminController.loginSuperAdmin);
-router.post("/refreshToken", validate({ body: adminValidator.refreshTokenSchema }), adminController.refreshToken);
+router.post(
+  "/super-admins",
+  validate({ body: adminValidator.createSuperAdminSchema }),
+  adminController.createSuperAdmin,
+);
+router.post(
+  "/super-admins/login",
+  validate({ body: adminValidator.loginSuperAdminSchema }),
+  adminController.loginSuperAdmin,
+);
+router.post(
+  "/refreshToken",
+  validate({ body: adminValidator.refreshTokenSchema }),
+  adminController.refreshToken,
+);
 router.post("/logout", adminController.logout);
 
-router.post("/admins", validate({ body: adminValidator.createSuperAdminSchema }), adminController.createAdmin);
-router.post("/admins/login", validate({ body: adminValidator.loginSuperAdminSchema }), adminController.loginAdmin);
+router.post(
+  "/admins",
+  validate({ body: adminValidator.createSuperAdminSchema }),
+  adminController.createAdmin,
+);
+router.post(
+  "/admins/login",
+  validate({ body: adminValidator.loginSuperAdminSchema }),
+  adminController.loginAdmin,
+);
+router.patch(
+  "/admins/:id",
+  validate({
+    params: adminValidator.getAdminByIdSchema,
+    body: adminValidator.updateAdminSchema,
+  }),
+  adminController.updateAdmin,
+);
+router.delete(
+  "/admins/:id",
+  validate({ params: adminValidator.getAdminByIdSchema }),
+  adminController.deleteAdmin,
+);
 
-router.get("/admins/:id", validate({ body: adminValidator.getAdminByIdSchema }), adminController.getAdminById);
-router.get("/admins", validate({ query: adminValidator.getAllAdminsSchema }), adminController.getAllAdmins);
+router.get(
+  "/admins/:id",
+  validate({ params: adminValidator.getAdminByIdSchema }),
+  adminController.getAdminById,
+);
+router.get(
+  "/admins",
+  validate({ query: adminValidator.getAllAdminsSchema }),
+  adminController.getAllAdmins,
+);
 
-router.post("/creators", validate({ body: adminValidator.createSuperAdminSchema }), adminController.createCreator);
-router.post("/creators/login", validate({ body: adminValidator.loginSuperAdminSchema }), adminController.loginCreator);
+router.post(
+  "/creators",
+  validate({ body: adminValidator.createSuperAdminSchema }),
+  adminController.createCreator,
+);
+router.post(
+  "/creators/login",
+  validate({ body: adminValidator.loginSuperAdminSchema }),
+  adminController.loginCreator,
+);
+router.get(
+  "/creators/:id",
+  validate({ params: adminValidator.getAdminByIdSchema }),
+  adminController.getCreatorById,
+);
+router.get(
+  "/creators",
+  validate({ query: adminValidator.getAllAdminsSchema }),
+  adminController.getAllCreators,
+);
+router.patch(
+  "/creators/:id",
+  validate({
+    params: adminValidator.getAdminByIdSchema,
+    body: adminValidator.updateAdminSchema,
+  }),
+  adminController.updateCreator,
+);
+router.delete(
+  "/creators/:id",
+  validate({ params: adminValidator.getAdminByIdSchema }),
+  adminController.deleteCreator,
+);
 
-router.get("/creators/:id", validate({ body: adminValidator.getAdminByIdSchema }), adminController.getCreatorById);
-router.get("/creators", validate({ query: adminValidator.getAllAdminsSchema }), adminController.getAllCreators);
+// ================= USERS =================
+
+router.get(
+  "/users",
+  validate({ query: adminValidator.getAllUsersSchema }),
+  adminController.getAllUsers,
+);
+
+router.get(
+  "/users/:id",
+  validate({ params: adminValidator.getAdminByIdSchema }),
+  adminController.getUserById,
+);
+
+
 
 // ================= GENRES =================
 
