@@ -6,18 +6,24 @@ import keyRoutes from "./routes/key.routes.js";
 import { connectPostgresDB } from "./config/db.js";
 import cors from "cors";
 import { startKeyGrpcServer } from "./grpc/keyGrpcServer.js";
+import { ensureActiveKey } from "./services/key.service.js";
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-connectPostgresDB();
-startKeyGrpcServer(GRPC_ADDRESS)
-    .then(() => {
-    console.log(`Key Management gRPC running at ${GRPC_ADDRESS}`);
-})
-    .catch((error) => {
-    console.error("Failed to start Key Management gRPC server", error);
-    process.exit(1);
-});
+const bootstrap = async () => {
+    try {
+        await connectPostgresDB();
+        const activeKey = await ensureActiveKey();
+        console.log(`Active key ready: ${activeKey.kid}`);
+        await startKeyGrpcServer(GRPC_ADDRESS);
+        console.log(`Key Management gRPC running at ${GRPC_ADDRESS}`);
+    }
+    catch (error) {
+        console.error("Failed to bootstrap Key Management service", error);
+        process.exit(1);
+    }
+};
+void bootstrap();
 app.use(cors());
 app.get("/", (_req, res) => {
     res.json({ service: "Key Management Service running" });

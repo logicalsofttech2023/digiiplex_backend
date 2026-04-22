@@ -9,8 +9,14 @@ export const errorMiddleware = (err, req, res, next) => {
         message = err.message;
         errors = err.errors;
     }
-    if (err instanceof Error && !(err instanceof ApiError)) {
-        message = err.message;
+    else if (err instanceof Error) {
+        const error = err;
+        message =
+            error.cause?.message ||
+                error.detail ||
+                error.hint ||
+                error.message;
+        console.error("🔥 FULL ERROR:", error);
     }
     return res.status(statusCode).json({
         success: false,

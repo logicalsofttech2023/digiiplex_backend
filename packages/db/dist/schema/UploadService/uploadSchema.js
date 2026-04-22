@@ -46,7 +46,6 @@ export const uploads = uploadService.table("uploads", {
     id: uuid("id")
         .default(sql `gen_random_uuid()`)
         .primaryKey(),
-    // creator_id references users with CREATOR role
     creatorId: uuid("creator_id")
         .notNull()
         .references(() => Users.id, { onDelete: "restrict" }),

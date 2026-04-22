@@ -9,7 +9,6 @@ export const s3 = new S3Client({
     },
     forcePathStyle: true,
 });
-// function bana lo
 export const setBucketCors = async () => {
     try {
         const command = new PutBucketCorsCommand({
@@ -27,10 +26,10 @@ export const setBucketCors = async () => {
             },
         });
         await s3.send(command);
-        console.log("CORS applied successfully ✅");
+        console.log("CORS applied successfully");
     }
     catch (error) {
-        console.error("CORS error ❌", error);
+        console.error("CORS error", error);
     }
 };
 //# sourceMappingURL=s3.js.map

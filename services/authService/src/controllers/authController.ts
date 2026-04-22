@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql, asc } from "drizzle-orm";
+import { and, desc, eq, gt,  asc } from "drizzle-orm";
 import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
@@ -13,7 +13,9 @@ import {
   setAuthCookies,
 } from "../utils/authCookies.js";
 import { deleteFromS3 } from "../utils/s3Delete.js";
-import { db, Users, profiles, genres, languages } from "@digiiplex6112/db";
+import { db, Users, profiles, genres, languages,faqs,aboutUs,privacyPolicy,termsConditions } from "@digiiplex6112/db";
+import { validate as isUUID } from "uuid";
+
 
 // ================= OTP GENERATE =================
 export const generateOTP = asyncHandler(async (req: Request, res: Response) => {
@@ -191,6 +193,26 @@ export const logout = asyncHandler(async (_req: Request, res: Response) => {
 });
 
 // ================= CREATE PROFILE =================
+const normalizeToArray = (value: any): string[] => {
+  if (!value) return [];
+
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [value];
+    } catch {
+      return [value];
+    }
+  }
+
+  return [];
+};
+
+const cleanUUIDArray = (arr: string[]) => {
+  return arr.filter((id) => isUUID(id));
+};
+
 export const createProfile = asyncHandler(
   async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -204,17 +226,25 @@ export const createProfile = asyncHandler(
       profileImg,
       profile_role = "ADULT",
       device_type = "UNKNOWN",
-      genresIds = [],
-      languagesIds = [],
       email,
       dob,
     } = req.body;
 
+    const genresIds = cleanUUIDArray(
+      normalizeToArray(req.body.genresIds)
+    );
+
+    const languagesIds = cleanUUIDArray(
+      normalizeToArray(req.body.languagesIds)
+    );
+
     if (!profileName) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Profile name is required");
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Profile name is required"
+      );
     }
 
-    // User exists check
     const [userExists] = await db
       .select({ id: Users.id })
       .from(Users)
@@ -225,7 +255,7 @@ export const createProfile = asyncHandler(
       throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found");
     }
 
-    // Existing profiles count check karo
+    //  Check existing profiles
     const existingProfiles = await db
       .select({ id: profiles.id })
       .from(profiles)
@@ -233,33 +263,60 @@ export const createProfile = asyncHandler(
 
     const isFirstProfile = existingProfiles.length === 0;
 
-    // First profile hai toh email & dob required hain
     if (isFirstProfile) {
       if (!email) {
         throw new ApiError(
           HTTP_STATUS.BAD_REQUEST,
-          "Email is required for the first profile",
+          "Email is required for the first profile"
         );
       }
+
       if (!dob) {
         throw new ApiError(
           HTTP_STATUS.BAD_REQUEST,
-          "Date of birth is required for the first profile",
+          "Date of birth is required for the first profile"
         );
       }
 
-      // Users table mein email & dob update karo
-      await db
-        .update(Users)
-        .set({
-          email,
-          dob,
-          updatedAt: new Date(),
-        })
-        .where(eq(Users.id, userId));
+      const [existingEmail] = await db
+        .select({ id: Users.id })
+        .from(Users)
+        .where(eq(Users.email, email))
+        .limit(1);
+
+      if (existingEmail && existingEmail.id !== userId) {
+        throw new ApiError(
+          HTTP_STATUS.BAD_REQUEST,
+          "Email already exists"
+        );
+      }
+
+      try {
+        await db
+          .update(Users)
+          .set({
+            email,
+            dob: dob || null,
+            updatedAt: new Date(),
+          })
+          .where(eq(Users.id, userId));
+
+      } catch (err: any) {
+        //  PostgreSQL unique constraint
+        if (err.code === "23505") {
+          throw new ApiError(
+            HTTP_STATUS.BAD_REQUEST,
+            "Email already exists"
+          );
+        }
+
+        throw new ApiError(
+          HTTP_STATUS.INTERNAL_SERVER_ERROR,
+          "Failed to update user"
+        );
+      }
     }
 
-    // Profile insert karo
     const [newProfile] = await db
       .insert(profiles)
       .values({
@@ -273,21 +330,120 @@ export const createProfile = asyncHandler(
       })
       .returning();
 
-    return res
-      .status(HTTP_STATUS.CREATED)
-      .json(
-        new ApiResponse(
-          HTTP_STATUS.CREATED,
-          isFirstProfile
-            ? "First profile created successfully"
-            : "Profile created successfully",
-          newProfile,
-        ),
-      );
-  },
+    return res.status(HTTP_STATUS.CREATED).json(
+      new ApiResponse(
+        HTTP_STATUS.CREATED,
+        isFirstProfile
+          ? "First profile created successfully"
+          : "Profile created successfully",
+        newProfile
+      )
+    );
+  }
 );
 
+// export const createProfile = asyncHandler(
+//   async (req: Request, res: Response) => {
+//     const userId = (req as any).user?.id;
+
+//     if (!userId) {
+//       throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Please login first");
+//     }
+
+//     const {
+//       profileName,
+//       profileImg,
+//       profile_role = "ADULT",
+//       device_type = "UNKNOWN",
+//       email,
+//       dob,
+//     } = req.body;
+
+//     const genresIds = cleanUUIDArray(
+//       normalizeToArray(req.body.genresIds)
+//     );
+
+//     const languagesIds = cleanUUIDArray(
+//       normalizeToArray(req.body.languagesIds)
+//     );
+
+//     if (!profileName) {
+//       throw new ApiError(
+//         HTTP_STATUS.BAD_REQUEST,
+//         "Profile name is required"
+//       );
+//     }
+
+//     const [userExists] = await db
+//       .select({ id: Users.id })
+//       .from(Users)
+//       .where(and(eq(Users.id, userId), eq(Users.isDeleted, false)))
+//       .limit(1);
+
+//     if (!userExists) {
+//       throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found");
+//     }
+
+//     const existingProfiles = await db
+//       .select({ id: profiles.id })
+//       .from(profiles)
+//       .where(eq(profiles.userId, userId));
+
+//     const isFirstProfile = existingProfiles.length === 0;
+
+//     if (isFirstProfile) {
+//       if (!email) {
+//         throw new ApiError(
+//           HTTP_STATUS.BAD_REQUEST,
+//           "Email is required for the first profile"
+//         );
+//       }
+
+//       if (!dob) {
+//         throw new ApiError(
+//           HTTP_STATUS.BAD_REQUEST,
+//           "Date of birth is required for the first profile"
+//         );
+//       }
+
+//       await db
+//         .update(Users)
+//         .set({
+//           email,
+//           dob,
+//           updatedAt: new Date(),
+//         })
+//         .where(eq(Users.id, userId));
+//     }
+
+
+//     const [newProfile] = await db
+//       .insert(profiles)
+//       .values({
+//         userId,
+//         profileName,
+//         profileImg: profileImg || null,
+//         profile_role,
+//         device_type,
+//         genresIds,
+//         languagesIds,
+//       })
+//       .returning();
+
+//     return res.status(HTTP_STATUS.CREATED).json(
+//       new ApiResponse(
+//         HTTP_STATUS.CREATED,
+//         isFirstProfile
+//           ? "First profile created successfully"
+//           : "Profile created successfully",
+//         newProfile
+//       )
+//     );
+//   }
+// );
+
 // ================= GET PROFILES =================
+
 export const getProfiles = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
 
@@ -344,3 +500,301 @@ export const getLanguages = asyncHandler(
       );
   },
 );
+
+
+// ================ FAQS =================  
+export const getFaqs = asyncHandler(async (_req: Request, res: Response) => {
+  const allFaqs = await db
+    .select()
+    .from(faqs)
+    .orderBy(asc(faqs.createdAt));
+
+  if (!allFaqs || allFaqs.length === 0) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "No FAQs found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "FAQs fetched successfully", allFaqs)
+  );
+});
+
+export const createFaq = asyncHandler(async (req: Request, res: Response) => {
+  const { title, description } = req.body;
+if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+  const newFaq = await db.insert(faqs).values({
+    title,
+    description,
+  }).returning();
+
+  return res.status(HTTP_STATUS.CREATED).json(
+    new ApiResponse(HTTP_STATUS.CREATED, "FAQ created successfully", newFaq)
+  );
+});
+
+export const updateFaq = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, description } = req.body;
+if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+  const safeId = Array.isArray(id) ? id[0] : id;
+
+  const updated = await db
+    .update(faqs)
+    .set({ title, description, updatedAt: new Date() })
+    .where(eq(faqs.id, safeId))
+    .returning();
+
+  if (!updated.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "FAQ not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "FAQ updated successfully", updated)
+  );
+});
+
+export const deleteFaq = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const safeId = Array.isArray(id) ? id[0] : id;
+
+  const deleted = await db
+    .delete(faqs)
+    .where(eq(faqs.id, safeId))
+    .returning();
+
+  if (!deleted.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "FAQ not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "FAQ deleted successfully", deleted)
+  );
+});
+
+// about us
+export const getAboutUs = asyncHandler(async (_req: Request, res: Response) => {
+  const data = await db
+    .select()
+    .from(aboutUs)
+    .orderBy(asc(aboutUs.createdAt));
+
+  if (!data || data.length === 0) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "No About Us data found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "About Us fetched successfully", data)
+  );
+});
+
+export const createAboutUs = asyncHandler(async (req: Request, res: Response) => {
+  const { title, description } = req.body;
+if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+  const created = await db.insert(aboutUs).values({
+    title,
+    description,
+  }).returning();
+
+  return res.status(HTTP_STATUS.CREATED).json(
+    new ApiResponse(HTTP_STATUS.CREATED, "About Us created successfully", created)
+  );
+});
+
+export const updateAboutUs = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, description, isActive } = req.body;
+  if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+  const safeId = Array.isArray(id) ? id[0] : id;
+
+  const updated = await db
+    .update(aboutUs)
+    .set({
+      title,
+      description,
+      isActive,
+      updatedAt: new Date(),
+    })
+    .where(eq(aboutUs.id, safeId))
+    .returning();
+
+  if (!updated.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "About Us not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "About Us updated successfully", updated)
+  );
+});
+
+export const deleteAboutUs = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const safeId = Array.isArray(id) ? id[0] : id;
+  const deleted = await db
+    .delete(aboutUs)
+    .where(eq(aboutUs.id, safeId))
+    .returning();
+
+  if (!deleted.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "About Us not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "About Us deleted successfully", deleted)
+  );
+});
+
+// privacy policy
+export const getPrivacyPolicy = asyncHandler(async (_req: Request, res: Response) => {
+  const data = await db
+    .select()
+    .from(privacyPolicy)
+    .orderBy(asc(privacyPolicy.createdAt));
+
+  if (!data || data.length === 0) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "No Privacy Policy found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Privacy Policy fetched successfully", data)
+  );
+});
+
+export const createPrivacyPolicy = asyncHandler(async (req: Request, res: Response) => {
+  const { title, description } = req.body;
+if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+  const created = await db.insert(privacyPolicy).values({
+    title,
+    description,
+  }).returning();
+
+  return res.status(HTTP_STATUS.CREATED).json(
+    new ApiResponse(HTTP_STATUS.CREATED, "Privacy Policy created successfully", created)
+  );
+});
+
+export const updatePrivacyPolicy = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, description, isActive } = req.body;
+  if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+const safeId = Array.isArray(id) ? id[0] : id;
+  const updated = await db
+    .update(privacyPolicy)
+    .set({
+      title,
+      description,
+      isActive,
+      updatedAt: new Date(),
+    })
+    .where(eq(privacyPolicy.id, safeId))
+    .returning();
+
+  if (!updated.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Privacy Policy not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Privacy Policy updated successfully", updated)
+  );
+});
+
+export const deletePrivacyPolicy = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const safeId = Array.isArray(id) ? id[0] : id;
+  const deleted = await db
+    .delete(privacyPolicy)
+    .where(eq(privacyPolicy.id, safeId))
+    .returning();
+
+  if (!deleted.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Privacy Policy not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Privacy Policy deleted successfully", deleted)
+  );
+});
+// terms & conditions
+export const getTermsConditions = asyncHandler(async (_req: Request, res: Response) => {
+  const data = await db
+    .select()
+    .from(termsConditions)
+    .orderBy(asc(termsConditions.createdAt));
+
+  if (!data || data.length === 0) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "No Terms & Conditions found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Terms & Conditions fetched successfully", data)
+  );
+});
+
+export const createTermsConditions = asyncHandler(async (req: Request, res: Response) => {
+  const { title, description } = req.body;
+if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+  const created = await db.insert(termsConditions).values({
+    title,
+    description,
+  }).returning();
+
+  return res.status(HTTP_STATUS.CREATED).json(
+    new ApiResponse(HTTP_STATUS.CREATED, "Terms & Conditions created successfully", created)
+  );
+});
+
+export const updateTermsConditions = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { title, description, isActive } = req.body;
+  if(!title || !description) {
+  throw new ApiError(HTTP_STATUS.BAD_REQUEST, "title and description are required");
+}
+const safeId = Array.isArray(id) ? id[0] : id;
+  const updated = await db
+    .update(termsConditions)
+    .set({
+      title,
+      description,
+      isActive,
+      updatedAt: new Date(),
+    })
+    .where(eq(termsConditions.id, safeId))
+    .returning();
+
+  if (!updated.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Terms & Conditions not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Terms & Conditions updated successfully", updated)
+  );
+});
+
+export const deleteTermsConditions = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+const safeId = Array.isArray(id) ? id[0] : id;
+  const deleted = await db
+    .delete(termsConditions)
+    .where(eq(termsConditions.id, safeId))
+    .returning();
+
+  if (!deleted.length) {
+    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Terms & Conditions not found");
+  }
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Terms & Conditions deleted successfully", deleted)
+  );
+});

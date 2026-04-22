@@ -6,10 +6,13 @@ const requiredEnv = (value, key) => {
     }
     return value;
 };
-export const PORT = process.env.PORT || 3006;
-export const NODE_ENV = process.env.NODE_ENV || "development";
-export const JWT_SECRET = process.env.JWT_SECRET || "secret";
-export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1d";
+export const PORT = requiredEnv(process.env.PORT, "PORT");
+export const NODE_ENV = requiredEnv(process.env.NODE_ENV, "NODE_ENV");
+export const JWT_SECRET = requiredEnv(process.env.JWT_SECRET, "JWT_SECRET");
+export const JWT_EXPIRES_IN = requiredEnv(process.env.JWT_EXPIRES_IN, "JWT_EXPIRES_IN");
+export const ACCESS_TOKEN_EXPIRES_IN = requiredEnv(process.env.ACCESS_TOKEN_EXPIRES_IN, "ACCESS_TOKEN_EXPIRES_IN");
+export const REFRESH_TOKEN_EXPIRES_IN = requiredEnv(process.env.REFRESH_TOKEN_EXPIRES_IN, "REFRESH_TOKEN_EXPIRES_IN") || requiredEnv(process.env.JWT_EXPIRES_IN, "JWT_EXPIRES_IN") || "7d";
+export const KEY_MANAGEMENT_GRPC_ADDRESS = requiredEnv(process.env.KEY_MANAGEMENT_GRPC_ADDRESS, "KEY_MANAGEMENT_GRPC_ADDRESS") || "localhost:50051";
 export const HTTP_STATUS = {
     OK: 200,
     CREATED: 201,

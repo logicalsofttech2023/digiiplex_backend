@@ -1,204 +1,666 @@
-import { and, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { HTTP_STATUS } from "../constants/constant.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
 import { deleteFromS3 } from "../utils/s3Delete.js";
-import { db, Users, genres, languages } from "@digiiplex6112/db";
-const ROLE_CONFIG = {
-    SUPER_ADMIN: { label: "Super admin", role: "SUPER_ADMIN", listKey: "superAdmins" },
-    ADMIN: { label: "Admin", role: "ADMIN", listKey: "admins" },
-    CREATOR: { label: "Creator", role: "CREATOR", listKey: "creators" },
-    USER: { label: "User", role: "USER", listKey: "users" },
-};
-const GENRE_CONFIG = {
-    label: "Genre",
-    listKey: "genres",
-    table: genres,
-};
-const LANGUAGE_CONFIG = {
-    label: "Language",
-    listKey: "languages",
-    table: languages,
-};
+import { db, Users, genres, languages, profiles } from "@digiiplex6112/db";
+import { generateTokenPair, verifyRefreshToken } from "../utils/jwt.js";
+import { clearAuthCookies, REFRESH_TOKEN_COOKIE, setAuthCookies, } from "../utils/authCookies.js";
 const parseCount = (value) => Number(value ?? 0);
-const getIdParam = (req) => {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    if (!id) {
-        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Id is required");
+// ==================== Super Admin ====================
+export const createSuperAdmin = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Email and password are required");
     }
-    return id;
-};
-const getPagination = (req) => {
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.max(Number(req.query.limit) || 10, 1);
-    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-    return { page, limit, search };
-};
-const parseBoolean = (value) => {
-    if (value === undefined)
-        return undefined;
-    if (typeof value === "boolean")
-        return value;
-    if (typeof value === "string") {
-        if (value.toLowerCase() === "true")
-            return true;
-        if (value.toLowerCase() === "false")
-            return false;
+    const existingAdmin = await db.query.Users.findFirst({
+        where: eq(Users.email, email),
+    });
+    if (existingAdmin) {
+        throw new ApiError(HTTP_STATUS.CONFLICT, "Admin with this email already exists");
     }
-    return undefined;
-};
-const getUploadedFileLocation = (req) => {
-    const file = req.file;
-    return file?.location;
-};
-const buildUserResponse = (user) => ({
-    id: user.id,
-    phone: user.phone,
-    email: user.email,
-    dob: user.dob,
-    authProvider: user.auth_provider,
-    role: user.role,
-    isVerified: user.isVerified,
-    isActive: user.isActive,
-    isDeleted: user.isDeleted,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-});
-const ensureUniqueUserFields = async ({ phone, email, excludeId, }) => {
-    if (phone) {
-        const phoneFilters = [eq(Users.phone, phone)];
-        if (excludeId)
-            phoneFilters.push(ne(Users.id, excludeId));
-        const [existingPhone] = await db
-            .select({ id: Users.id })
-            .from(Users)
-            .where(and(...phoneFilters))
-            .limit(1);
-        if (existingPhone) {
-            throw new ApiError(HTTP_STATUS.CONFLICT, "User with this phone already exists");
-        }
-    }
-    if (email) {
-        const emailFilters = [eq(Users.email, email)];
-        if (excludeId)
-            emailFilters.push(ne(Users.id, excludeId));
-        const [existingEmail] = await db
-            .select({ id: Users.id })
-            .from(Users)
-            .where(and(...emailFilters))
-            .limit(1);
-        if (existingEmail) {
-            throw new ApiError(HTTP_STATUS.CONFLICT, "User with this email already exists");
-        }
-    }
-};
-const buildCreateUserValues = (req, role) => {
-    const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
-    const email = typeof req.body.email === "string" && req.body.email.trim()
-        ? req.body.email.trim()
-        : null;
-    const dob = typeof req.body.dob === "string" && req.body.dob.trim()
-        ? req.body.dob.trim()
-        : null;
-    const authProvider = typeof req.body.authProvider === "string" && req.body.authProvider.trim()
-        ? req.body.authProvider.trim().toUpperCase()
-        : undefined;
-    const isVerified = parseBoolean(req.body.isVerified);
-    const isActive = parseBoolean(req.body.isActive);
-    const isDeleted = parseBoolean(req.body.isDeleted);
-    if (!phone) {
-        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "phone is required");
-    }
-    return {
-        phone,
+    const [admin] = await db
+        .insert(Users)
+        .values({
         email,
-        dob,
-        role,
-        ...(authProvider
-            ? { auth_provider: authProvider }
-            : {}),
-        ...(isVerified !== undefined ? { isVerified } : {}),
-        ...(isActive !== undefined ? { isActive } : {}),
-        ...(isDeleted !== undefined ? { isDeleted } : {}),
-    };
-};
-const buildUpdateUserValues = (req, role) => {
+        password,
+        role: "SUPER_ADMIN",
+    })
+        .returning();
+    return res.status(HTTP_STATUS.CREATED).json(new ApiResponse(HTTP_STATUS.CREATED, "Super admin created successfully", {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+    }));
+});
+export const loginSuperAdmin = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Email and password are required");
+    }
+    const admin = await db.query.Users.findFirst({
+        where: and(eq(Users.email, email), eq(Users.role, "SUPER_ADMIN")),
+    });
+    if (!admin || admin.password !== password) {
+        throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid email or password");
+    }
+    const tokens = await generateTokenPair({
+        id: admin.id,
+        role: admin.role || "SUPER_ADMIN",
+    });
+    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Super admin logged in successfully", {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+        ...tokens,
+    }));
+});
+export const refreshToken = asyncHandler(async (req, res) => {
+    const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE] || req.body.refreshToken;
+    if (!refreshToken) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Refresh token is required");
+    }
+    const payload = await verifyRefreshToken(refreshToken);
+    const tokens = await generateTokenPair({
+        id: payload.id,
+        role: payload.role,
+    });
+    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Tokens refreshed successfully", tokens));
+});
+export const logout = asyncHandler(async (req, res) => {
+    clearAuthCookies(res);
+    return res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Logged out successfully"));
+});
+// ==================== Admin ====================
+export const createAdmin = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    const existingAdmin = await db.query.Users.findFirst({
+        where: eq(Users.email, email),
+    });
+    if (existingAdmin) {
+        throw new ApiError(HTTP_STATUS.CONFLICT, "Admin with this email already exists");
+    }
+    const [admin] = await db
+        .insert(Users)
+        .values({
+        email,
+        password,
+        role: "ADMIN",
+    })
+        .returning();
+    return res.status(HTTP_STATUS.CREATED).json(new ApiResponse(HTTP_STATUS.CREATED, "Admin created successfully", {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+    }));
+});
+export const loginAdmin = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    const admin = await db.query.Users.findFirst({
+        where: and(eq(Users.email, email), eq(Users.role, "ADMIN")),
+    });
+    if (!admin || admin.password !== password) {
+        throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid email or password");
+    }
+    const tokens = await generateTokenPair({
+        id: admin.id,
+        role: admin.role || "ADMIN",
+    });
+    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Admin logged in successfully", {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+        ...tokens,
+    }));
+});
+export const getAdminById = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const admin = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
+    });
+    if (!admin) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Admin not found");
+    }
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Admin fetched successfully", {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+    }));
+});
+export const getAllAdmins = asyncHandler(async (req, res) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = req.query.search || "";
+    const offset = (page - 1) * limit;
+    const searchCondition = search
+        ? or(ilike(Users.email, `%${search}%`))
+        : undefined;
+    const whereCondition = searchCondition
+        ? and(eq(Users.role, "ADMIN"), searchCondition)
+        : eq(Users.role, "ADMIN");
+    const admins = await db.query.Users.findMany({
+        where: whereCondition,
+        limit,
+        offset,
+    });
+    const totalAdmins = await db.query.Users.findMany({
+        where: whereCondition,
+    });
+    if (!admins || admins.length === 0) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "No admins found");
+    }
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Admins fetched successfully", {
+        data: admins.map((admin) => ({
+            id: admin.id,
+            email: admin.email,
+            role: admin.role,
+        })),
+        pagination: {
+            total: totalAdmins.length,
+            page,
+            limit,
+            totalPages: Math.ceil(totalAdmins.length / limit),
+        },
+    }));
+});
+export const updateAdmin = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { email, password } = req.body;
+    // Check if admin exists
+    const existingAdmin = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
+    });
+    if (!existingAdmin) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Admin not found");
+    }
+    if (email && email !== existingAdmin.email) {
+        const emailExists = await db.query.Users.findFirst({
+            where: eq(Users.email, email),
+        });
+        if (emailExists) {
+            throw new ApiError(HTTP_STATUS.CONFLICT, "Email already in use");
+        }
+    }
+    const updateData = {};
+    if (email)
+        updateData.email = email;
+    if (password)
+        updateData.password = password;
+    const [updatedAdmin] = await db
+        .update(Users)
+        .set(updateData)
+        .where(eq(Users.id, id))
+        .returning();
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Admin updated successfully", {
+        id: updatedAdmin.id,
+        email: updatedAdmin.email,
+        role: updatedAdmin.role,
+    }));
+});
+export const deleteAdmin = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const existingAdmin = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
+    });
+    if (!existingAdmin) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Admin not found");
+    }
+    await db.delete(Users).where(eq(Users.id, id));
+    return res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Admin deleted successfully", null));
+});
+// ==================== Creator ====================
+export const createCreator = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    const existingCreator = await db.query.Users.findFirst({
+        where: eq(Users.email, email),
+    });
+    if (existingCreator) {
+        throw new ApiError(HTTP_STATUS.CONFLICT, "Creator with this email already exists");
+    }
+    const [creator] = await db
+        .insert(Users)
+        .values({
+        email,
+        password,
+        role: "CREATOR",
+    })
+        .returning();
+    return res.status(HTTP_STATUS.CREATED).json(new ApiResponse(HTTP_STATUS.CREATED, "Creator created successfully", {
+        id: creator.id,
+        email: creator.email,
+        role: creator.role,
+    }));
+});
+export const loginCreator = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    const creator = await db.query.Users.findFirst({
+        where: and(eq(Users.email, email), eq(Users.role, "CREATOR")),
+    });
+    if (!creator || creator.password !== password) {
+        throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid email or password");
+    }
+    const tokens = await generateTokenPair({
+        id: creator.id,
+        role: creator.role || "CREATOR",
+    });
+    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Creator logged in successfully", {
+        id: creator.id,
+        email: creator.email,
+        role: creator.role,
+        ...tokens,
+    }));
+});
+export const getCreatorById = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const creator = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
+    });
+    if (!creator) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
+    }
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Creator fetched successfully", {
+        id: creator.id,
+        email: creator.email,
+        role: creator.role,
+    }));
+});
+export const getAllCreators = asyncHandler(async (req, res) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = req.query.search || "";
+    const offset = (page - 1) * limit;
+    const searchCondition = search
+        ? or(ilike(Users.email, `%${search}%`))
+        : undefined;
+    const whereCondition = searchCondition
+        ? and(eq(Users.role, "CREATOR"), searchCondition)
+        : eq(Users.role, "CREATOR");
+    const creators = await db.query.Users.findMany({
+        where: whereCondition,
+        limit,
+        offset,
+    });
+    const totalCreators = await db.query.Users.findMany({
+        where: whereCondition,
+    });
+    if (!creators || creators.length === 0) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "No creators found");
+    }
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Creators fetched successfully", {
+        data: creators.map((creator) => ({
+            id: creator.id,
+            email: creator.email,
+            role: creator.role,
+        })),
+        pagination: {
+            total: totalCreators.length,
+            page,
+            limit,
+            totalPages: Math.ceil(totalCreators.length / limit),
+        },
+    }));
+});
+export const updateCreator = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { email, password } = req.body;
+    const existingCreator = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
+    });
+    if (!existingCreator) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
+    }
+    if (existingCreator.role !== "CREATOR") {
+        throw new ApiError(HTTP_STATUS.FORBIDDEN, "User is not a creator");
+    }
+    if (email && email !== existingCreator.email) {
+        const emailExists = await db.query.Users.findFirst({
+            where: eq(Users.email, email),
+        });
+        if (emailExists) {
+            throw new ApiError(HTTP_STATUS.CONFLICT, "Email already in use");
+        }
+    }
+    const updateData = {};
+    if (email)
+        updateData.email = email;
+    if (password)
+        updateData.password = password;
+    const [updatedCreator] = await db
+        .update(Users)
+        .set(updateData)
+        .where(eq(Users.id, id))
+        .returning();
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Creator updated successfully", {
+        id: updatedCreator.id,
+        email: updatedCreator.email,
+        role: updatedCreator.role,
+    }));
+});
+export const deleteCreator = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const existingCreator = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
+    });
+    if (!existingCreator) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
+    }
+    if (existingCreator.role !== "CREATOR") {
+        throw new ApiError(HTTP_STATUS.FORBIDDEN, "User is not a creator");
+    }
+    await db.delete(Users).where(eq(Users.id, id));
+    return res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Creator deleted successfully", null));
+});
+// ==================== GENRE MANAGEMENT ====================
+export const createGenre = asyncHandler(async (req, res) => {
+    const { name } = req.body;
+    if (!req.file || !name) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "name and image are required");
+    }
+    const existingGenre = await db.query.genres.findFirst({
+        where: eq(genres.name, name),
+    });
+    if (existingGenre) {
+        throw new ApiError(HTTP_STATUS.CONFLICT, "Genre name already exists");
+    }
+    const [genre] = await db
+        .insert(genres)
+        .values({
+        name,
+        image: req.file.location,
+        isActive: true,
+        updatedAt: new Date(),
+    })
+        .returning();
+    return res
+        .status(HTTP_STATUS.CREATED)
+        .json(new ApiResponse(HTTP_STATUS.CREATED, "Genre created successfully", genre));
+});
+export const updateGenre = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { name, isActive } = req.body;
+    if (!id) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
+    const genre = await db.query.genres.findFirst({
+        where: eq(genres.id, id),
+    });
+    if (!genre) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Genre not found");
+    }
+    let imageUrl = genre.image;
+    if (req.file) {
+        if (genre.image) {
+            await deleteFromS3(genre.image);
+        }
+        imageUrl = req.file.location;
+    }
     const updateData = {
-        role,
         updatedAt: new Date(),
     };
-    if (typeof req.body.phone === "string") {
-        const phone = req.body.phone.trim();
-        if (!phone) {
-            throw new ApiError(HTTP_STATUS.BAD_REQUEST, "phone cannot be empty");
-        }
-        updateData.phone = phone;
-    }
-    if (req.body.email !== undefined) {
-        if (typeof req.body.email !== "string") {
-            throw new ApiError(HTTP_STATUS.BAD_REQUEST, "email must be a string");
-        }
-        updateData.email = req.body.email.trim() || null;
-    }
-    if (req.body.dob !== undefined) {
-        if (typeof req.body.dob !== "string") {
-            throw new ApiError(HTTP_STATUS.BAD_REQUEST, "dob must be a string");
-        }
-        updateData.dob = req.body.dob.trim() || null;
-    }
-    if (req.body.authProvider !== undefined) {
-        if (typeof req.body.authProvider !== "string" ||
-            !req.body.authProvider.trim()) {
-            throw new ApiError(HTTP_STATUS.BAD_REQUEST, "authProvider must be a non-empty string");
-        }
-        updateData.auth_provider =
-            req.body.authProvider.trim().toUpperCase();
-    }
-    const isVerified = parseBoolean(req.body.isVerified);
-    if (isVerified !== undefined)
-        updateData.isVerified = isVerified;
-    const isActive = parseBoolean(req.body.isActive);
-    if (isActive !== undefined)
+    if (name)
+        updateData.name = name;
+    if (imageUrl)
+        updateData.image = imageUrl;
+    if (typeof isActive === "boolean")
         updateData.isActive = isActive;
-    const isDeleted = parseBoolean(req.body.isDeleted);
-    if (isDeleted !== undefined)
-        updateData.isDeleted = isDeleted;
-    return updateData;
-};
-const getManagedUserById = async (id, role) => {
-    const [user] = await db
-        .select()
-        .from(Users)
-        .where(and(eq(Users.id, id), eq(Users.role, role)))
-        .limit(1);
-    return user;
-};
-const createManagedUser = (config) => asyncHandler(async (req, res) => {
-    const values = buildCreateUserValues(req, config.role);
-    await ensureUniqueUserFields({ phone: values.phone, email: values.email });
-    const [user] = await db.insert(Users).values(values).returning();
-    res.status(HTTP_STATUS.CREATED).json(new ApiResponse(HTTP_STATUS.CREATED, `${config.label} created successfully`, { user: buildUserResponse(user) }));
+    const [updatedGenre] = await db
+        .update(genres)
+        .set(updateData)
+        .where(eq(genres.id, id))
+        .returning();
+    return res.json(new ApiResponse(HTTP_STATUS.OK, "Genre updated successfully", updatedGenre));
 });
-const getManagedUsers = (config) => asyncHandler(async (req, res) => {
-    const { page, limit, search } = getPagination(req);
-    let whereClause = eq(Users.role, config.role);
-    if (search) {
-        whereClause = and(whereClause, or(ilike(Users.phone, `%${search}%`), ilike(sql `coalesce(${Users.email}, '')`, `%${search}%`), ilike(sql `coalesce(${Users.dob}, '')`, `%${search}%`)));
+export const deleteGenre = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
     }
+    const genre = await db.query.genres.findFirst({
+        where: eq(genres.id, id),
+    });
+    if (!genre) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Genre not found");
+    }
+    if (genre.image) {
+        await deleteFromS3(genre.image);
+    }
+    await db.delete(genres).where(eq(genres.id, id));
+    return res.json(new ApiResponse(HTTP_STATUS.OK, "Genre deleted successfully", null));
+});
+export const getAllGenres = asyncHandler(async (req, res) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = req.query.search || "";
+    const isActive = req.query.isActive === "true"
+        ? true
+        : req.query.isActive === "false"
+            ? false
+            : undefined;
+    let whereClause = search
+        ? ilike(genres.name, `%${search}%`)
+        : undefined;
+    if (isActive !== undefined) {
+        if (whereClause) {
+            whereClause = and(whereClause, eq(genres.isActive, isActive));
+        }
+        else {
+            whereClause = eq(genres.isActive, isActive);
+        }
+    }
+    const [{ count }] = await db
+        .select({ count: sql `count(*)` })
+        .from(genres)
+        .where(whereClause);
+    const genreRows = await db
+        .select()
+        .from(genres)
+        .where(whereClause)
+        .orderBy(desc(genres.createdAt))
+        .limit(limit)
+        .offset((page - 1) * limit);
+    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Genres fetched successfully", {
+        genres: genreRows,
+        pagination: {
+            total: parseCount(count),
+            page,
+            limit,
+            totalPages: Math.ceil(parseCount(count) / limit),
+        },
+    }));
+});
+export const getGenreById = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
+    const genre = await db.query.genres.findFirst({
+        where: eq(genres.id, id),
+    });
+    if (!genre) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Genre not found");
+    }
+    res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Genre fetched successfully", genre));
+});
+// ==================== LANGUAGE MANAGEMENT ====================
+export const createLanguage = asyncHandler(async (req, res) => {
+    const { name } = req.body;
+    if (!req.file || !name) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "name and image are required");
+    }
+    const existingLanguage = await db.query.languages.findFirst({
+        where: eq(languages.name, name),
+    });
+    if (existingLanguage) {
+        throw new ApiError(HTTP_STATUS.CONFLICT, "Language name already exists");
+    }
+    const [language] = await db
+        .insert(languages)
+        .values({
+        name,
+        image: req.file.location,
+        isActive: true,
+        updatedAt: new Date(),
+    })
+        .returning();
+    return res
+        .status(HTTP_STATUS.CREATED)
+        .json(new ApiResponse(HTTP_STATUS.CREATED, "Language created successfully", language));
+});
+export const updateLanguage = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { name, isActive } = req.body;
+    if (!id) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
+    const existingLanguage = await db.query.languages.findFirst({
+        where: eq(languages.id, id),
+    });
+    if (!existingLanguage) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
+    }
+    let imageUrl = existingLanguage.image;
+    if (req.file) {
+        if (existingLanguage.image) {
+            await deleteFromS3(existingLanguage.image);
+        }
+        imageUrl = req.file.location;
+    }
+    const updateData = {
+        updatedAt: new Date(),
+    };
+    if (name)
+        updateData.name = name;
+    if (imageUrl)
+        updateData.image = imageUrl;
+    if (typeof isActive === "boolean")
+        updateData.isActive = isActive;
+    const [updatedLanguage] = await db
+        .update(languages)
+        .set(updateData)
+        .where(eq(languages.id, id))
+        .returning();
+    return res.json(new ApiResponse(HTTP_STATUS.OK, "Language updated successfully", updatedLanguage));
+});
+export const deleteLanguage = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
+    const existingLanguage = await db.query.languages.findFirst({
+        where: eq(languages.id, id),
+    });
+    if (!existingLanguage) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
+    }
+    if (existingLanguage.image) {
+        await deleteFromS3(existingLanguage.image);
+    }
+    await db.delete(languages).where(eq(languages.id, id));
+    return res.json(new ApiResponse(HTTP_STATUS.OK, "Language deleted successfully", null));
+});
+export const getAllLanguages = asyncHandler(async (req, res) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = req.query.search || "";
+    const isActive = req.query.isActive === "true"
+        ? true
+        : req.query.isActive === "false"
+            ? false
+            : undefined;
+    let whereClause = search
+        ? ilike(languages.name, `%${search}%`)
+        : undefined;
+    if (isActive !== undefined) {
+        if (whereClause) {
+            whereClause = and(whereClause, eq(languages.isActive, isActive));
+        }
+        else {
+            whereClause = eq(languages.isActive, isActive);
+        }
+    }
+    const [{ count }] = await db
+        .select({ count: sql `count(*)` })
+        .from(languages)
+        .where(whereClause);
+    const languageRows = await db
+        .select()
+        .from(languages)
+        .where(whereClause)
+        .orderBy(desc(languages.createdAt))
+        .limit(limit)
+        .offset((page - 1) * limit);
+    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Languages fetched successfully", {
+        languages: languageRows,
+        pagination: {
+            total: parseCount(count),
+            page,
+            limit,
+            totalPages: Math.ceil(parseCount(count) / limit),
+        },
+    }));
+});
+export const getLanguageById = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "id is required");
+    }
+    const language = await db.query.languages.findFirst({
+        where: eq(languages.id, id),
+    });
+    if (!language) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Language not found");
+    }
+    res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Language fetched successfully", language));
+});
+// ==================== Users MANAGEMENT ====================
+export const getAllUsers = asyncHandler(async (req, res) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const search = req.query.search || "";
+    const isActive = req.query.isActive === "true"
+        ? true
+        : req.query.isActive === "false"
+            ? false
+            : undefined;
+    let whereClause = eq(Users.isDeleted, false);
+    if (search) {
+        const searchCondition = or(ilike(Users.email, `%${search}%`), ilike(Users.phone, `%${search}%`));
+        whereClause = and(whereClause, searchCondition);
+    }
+    if (isActive !== undefined) {
+        whereClause = and(whereClause, eq(Users.isActive, isActive));
+    }
+    whereClause = and(whereClause, eq(Users.role, "USER"));
     const [{ count }] = await db
         .select({ count: sql `count(*)` })
         .from(Users)
         .where(whereClause);
-    const rows = await db
+    const users = await db
         .select()
         .from(Users)
         .where(whereClause)
         .orderBy(desc(Users.createdAt))
         .limit(limit)
         .offset((page - 1) * limit);
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label}s fetched successfully`, {
-        [config.listKey]: rows.map(buildUserResponse),
+    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Users fetched successfully", {
+        users,
         pagination: {
             total: parseCount(count),
             page,
@@ -207,200 +669,21 @@ const getManagedUsers = (config) => asyncHandler(async (req, res) => {
         },
     }));
 });
-const getManagedUser = (config) => asyncHandler(async (req, res) => {
-    const id = getIdParam(req);
-    const user = await getManagedUserById(id, config.role);
-    if (!user) {
-        throw new ApiError(HTTP_STATUS.NOT_FOUND, `${config.label} not found`);
-    }
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label} fetched successfully`, {
-        user: buildUserResponse(user),
-    }));
-});
-const updateManagedUser = (config) => asyncHandler(async (req, res) => {
-    const id = getIdParam(req);
-    const existingUser = await getManagedUserById(id, config.role);
-    if (!existingUser) {
-        throw new ApiError(HTTP_STATUS.NOT_FOUND, `${config.label} not found`);
-    }
-    const updateData = buildUpdateUserValues(req, config.role);
-    await ensureUniqueUserFields({
-        phone: updateData.phone,
-        email: updateData.email,
-        excludeId: id,
+export const getUserById = asyncHandler(async (req, res) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const user = await db.query.Users.findFirst({
+        where: eq(Users.id, id),
     });
-    const [user] = await db
-        .update(Users)
-        .set(updateData)
-        .where(eq(Users.id, id))
-        .returning();
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label} updated successfully`, { user: buildUserResponse(user) }));
-});
-const deleteManagedUser = (config) => asyncHandler(async (req, res) => {
-    const id = getIdParam(req);
-    const existingUser = await getManagedUserById(id, config.role);
-    if (!existingUser) {
-        throw new ApiError(HTTP_STATUS.NOT_FOUND, `${config.label} not found`);
+    if (!user || user.isDeleted) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found");
     }
-    await db.delete(Users).where(eq(Users.id, id));
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label} deleted successfully`));
-});
-const createAssetEntity = (config) => asyncHandler(async (req, res) => {
-    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    const image = getUploadedFileLocation(req);
-    if (!name) {
-        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "name is required");
-    }
-    if (!image) {
-        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "image is required");
-    }
-    const [existing] = await db
-        .select({ id: config.table.id })
-        .from(config.table)
-        .where(eq(config.table.name, name))
-        .limit(1);
-    if (existing) {
-        throw new ApiError(HTTP_STATUS.CONFLICT, `${config.label} with this name already exists`);
-    }
-    const [record] = await db
-        .insert(config.table)
-        .values({ name, image })
-        .returning();
-    res.status(HTTP_STATUS.CREATED).json(new ApiResponse(HTTP_STATUS.CREATED, `${config.label} created successfully`, { [config.label.toLowerCase()]: record }));
-});
-const getAssetEntities = (config) => asyncHandler(async (req, res) => {
-    const { page, limit, search } = getPagination(req);
-    const isActive = parseBoolean(req.query.isActive);
-    let whereClause = search ? ilike(config.table.name, `%${search}%`) : undefined;
-    if (isActive !== undefined) {
-        whereClause = whereClause
-            ? and(whereClause, eq(config.table.isActive, isActive))
-            : eq(config.table.isActive, isActive);
-    }
-    const [{ count }] = await db
-        .select({ count: sql `count(*)` })
-        .from(config.table)
-        .where(whereClause);
-    const rows = await db
+    const userProfiles = await db
         .select()
-        .from(config.table)
-        .where(whereClause)
-        .orderBy(desc(config.table.createdAt))
-        .limit(limit)
-        .offset((page - 1) * limit);
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label}s fetched successfully`, {
-        [config.listKey]: rows,
-        pagination: {
-            total: parseCount(count),
-            page,
-            limit,
-            totalPages: Math.ceil(parseCount(count) / limit),
-        },
+        .from(profiles)
+        .where(eq(profiles.userId, id));
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "User fetched successfully", {
+        user,
+        profiles: userProfiles,
     }));
 });
-const getAssetEntity = (config) => asyncHandler(async (req, res) => {
-    const id = getIdParam(req);
-    const [record] = await db
-        .select()
-        .from(config.table)
-        .where(eq(config.table.id, id))
-        .limit(1);
-    if (!record) {
-        throw new ApiError(HTTP_STATUS.NOT_FOUND, `${config.label} not found`);
-    }
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label} fetched successfully`, {
-        [config.label.toLowerCase()]: record,
-    }));
-});
-const updateAssetEntity = (config) => asyncHandler(async (req, res) => {
-    const id = getIdParam(req);
-    const image = getUploadedFileLocation(req);
-    const [existing] = await db
-        .select()
-        .from(config.table)
-        .where(eq(config.table.id, id))
-        .limit(1);
-    if (!existing) {
-        throw new ApiError(HTTP_STATUS.NOT_FOUND, `${config.label} not found`);
-    }
-    const updateData = {
-        updatedAt: new Date(),
-    };
-    if (typeof req.body.name === "string") {
-        const name = req.body.name.trim();
-        if (!name) {
-            throw new ApiError(HTTP_STATUS.BAD_REQUEST, "name cannot be empty");
-        }
-        const [duplicate] = await db
-            .select({ id: config.table.id })
-            .from(config.table)
-            .where(and(eq(config.table.name, name), ne(config.table.id, id)))
-            .limit(1);
-        if (duplicate) {
-            throw new ApiError(HTTP_STATUS.CONFLICT, `${config.label} with this name already exists`);
-        }
-        updateData.name = name;
-    }
-    const isActive = parseBoolean(req.body.isActive);
-    if (isActive !== undefined)
-        updateData.isActive = isActive;
-    if (image) {
-        updateData.image = image;
-        if (existing.image) {
-            await deleteFromS3(existing.image);
-        }
-    }
-    const [record] = await db
-        .update(config.table)
-        .set(updateData)
-        .where(eq(config.table.id, id))
-        .returning();
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label} updated successfully`, { [config.label.toLowerCase()]: record }));
-});
-const deleteAssetEntity = (config) => asyncHandler(async (req, res) => {
-    const id = getIdParam(req);
-    const [existing] = await db
-        .select()
-        .from(config.table)
-        .where(eq(config.table.id, id))
-        .limit(1);
-    if (!existing) {
-        throw new ApiError(HTTP_STATUS.NOT_FOUND, `${config.label} not found`);
-    }
-    if (existing.image) {
-        await deleteFromS3(existing.image);
-    }
-    await db.delete(config.table).where(eq(config.table.id, id));
-    res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, `${config.label} deleted successfully`));
-});
-export const createSuperAdmin = createManagedUser(ROLE_CONFIG.SUPER_ADMIN);
-export const getAllSuperAdmins = getManagedUsers(ROLE_CONFIG.SUPER_ADMIN);
-export const getSuperAdminById = getManagedUser(ROLE_CONFIG.SUPER_ADMIN);
-export const updateSuperAdmin = updateManagedUser(ROLE_CONFIG.SUPER_ADMIN);
-export const deleteSuperAdmin = deleteManagedUser(ROLE_CONFIG.SUPER_ADMIN);
-export const createAdmin = createManagedUser(ROLE_CONFIG.ADMIN);
-export const getAllAdmins = getManagedUsers(ROLE_CONFIG.ADMIN);
-export const getAdminById = getManagedUser(ROLE_CONFIG.ADMIN);
-export const updateAdmin = updateManagedUser(ROLE_CONFIG.ADMIN);
-export const deleteAdmin = deleteManagedUser(ROLE_CONFIG.ADMIN);
-export const createCreator = createManagedUser(ROLE_CONFIG.CREATOR);
-export const getAllCreators = getManagedUsers(ROLE_CONFIG.CREATOR);
-export const getCreatorById = getManagedUser(ROLE_CONFIG.CREATOR);
-export const updateCreator = updateManagedUser(ROLE_CONFIG.CREATOR);
-export const deleteCreator = deleteManagedUser(ROLE_CONFIG.CREATOR);
-export const createUser = createManagedUser(ROLE_CONFIG.USER);
-export const getAllUsers = getManagedUsers(ROLE_CONFIG.USER);
-export const getUserById = getManagedUser(ROLE_CONFIG.USER);
-export const updateUser = updateManagedUser(ROLE_CONFIG.USER);
-export const deleteUser = deleteManagedUser(ROLE_CONFIG.USER);
-export const createGenre = createAssetEntity(GENRE_CONFIG);
-export const getAllGenres = getAssetEntities(GENRE_CONFIG);
-export const getGenreById = getAssetEntity(GENRE_CONFIG);
-export const updateGenre = updateAssetEntity(GENRE_CONFIG);
-export const deleteGenre = deleteAssetEntity(GENRE_CONFIG);
-export const createLanguage = createAssetEntity(LANGUAGE_CONFIG);
-export const getAllLanguages = getAssetEntities(LANGUAGE_CONFIG);
-export const getLanguageById = getAssetEntity(LANGUAGE_CONFIG);
-export const updateLanguage = updateAssetEntity(LANGUAGE_CONFIG);
-export const deleteLanguage = deleteAssetEntity(LANGUAGE_CONFIG);
 //# sourceMappingURL=AdminController.js.map

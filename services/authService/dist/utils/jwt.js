@@ -1,5 +1,5 @@
-import { createPrivateKey, createPublicKey } from "crypto";
-import { decode, V2 } from "paseto";
+import { createPrivateKey } from "crypto";
+import jwt from "jsonwebtoken";
 import ApiError from "./ApiError.js";
 import { HTTP_STATUS } from "../constants/constant.js";
 import { ACCESS_TOKEN_EXPIRES_IN, REFRESH_TOKEN_EXPIRES_IN, } from "../constants/constant.js";
@@ -35,38 +35,30 @@ const getPublicKeys = async () => {
     publicKeysCache = setCachedValue(response.keys);
     return response.keys;
 };
-const parseFooter = (footer) => {
-    if (!footer) {
-        return {};
-    }
-    try {
-        return JSON.parse(footer.toString());
-    }
-    catch {
-        return {};
-    }
-};
 const getPublicKeyForToken = async (token) => {
-    const decoded = decode(token);
-    const footer = parseFooter(decoded.footer);
+    const decoded = jwt.decode(token, { complete: true });
+    const kid = typeof decoded === "object" ? decoded?.header?.kid : undefined;
     const keys = await getPublicKeys();
-    const matchedKey = keys.find((key) => key.kid === footer.kid) || (await getActiveKey());
-    return createPublicKey(matchedKey.publicKey);
+    const matchedKey = keys.find((key) => key.kid === kid) || (await getActiveKey());
+    return matchedKey.publicKey;
 };
 const signToken = async (payload, tokenType, expiresIn) => {
     const activeKey = await getActiveKey();
     const privateKey = createPrivateKey(activeKey.privateKey);
-    return V2.sign({
+    return jwt.sign({
         ...payload,
         tokenType,
     }, privateKey, {
+        algorithm: "RS256",
         expiresIn,
-        footer: { kid: activeKey.kid },
+        keyid: activeKey.kid,
     });
 };
 const verifyToken = async (token, expectedType) => {
     const publicKey = await getPublicKeyForToken(token);
-    const payload = await V2.verify(token, publicKey);
+    const payload = jwt.verify(token, publicKey, {
+        algorithms: ["RS256"],
+    });
     if (payload.tokenType !== expectedType) {
         throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid token type");
     }

@@ -7,6 +7,7 @@ import ApiError from "../utils/ApiError.js";
 import { generateTokenPair, verifyRefreshToken } from "../utils/jwt.js";
 import { clearAuthCookies, REFRESH_TOKEN_COOKIE, setAuthCookies, } from "../utils/authCookies.js";
 import { db, Users, profiles, genres, languages } from "@digiiplex6112/db";
+import { validate as isUUID } from "uuid";
 // ================= OTP GENERATE =================
 export const generateOTP = asyncHandler(async (req, res) => {
     const { phone } = req.body;
@@ -49,7 +50,6 @@ export const verifyOTP = asyncHandler(async (req, res) => {
     if (!user) {
         throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid or expired OTP");
     }
-    // 🔹 UPDATE USER
     const [updatedUser] = await db
         .update(Users)
         .set({
@@ -66,29 +66,51 @@ export const verifyOTP = asyncHandler(async (req, res) => {
         role: Users.role,
         isVerified: Users.isVerified,
     });
-    // 🔥 🔹 PROFILE CHECK (IMPORTANT)
     const existingProfile = await db
         .select({ id: profiles.id })
         .from(profiles)
         .where(eq(profiles.userId, updatedUser.id))
         .limit(1);
-    const hasProfiles = existingProfile.length > 0;
-    if (!hasProfiles) {
-        return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "OTP verified successfully", {
-            user: updatedUser,
-            hasProfiles: false,
-        }));
-    }
-    // ✅ HAS PROFILE → GENERATE TOKENS
     const tokens = await generateTokenPair({
         id: updatedUser.id,
-        role: updatedUser.role,
+        role: updatedUser.role || "USER",
     });
     setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    const hasProfiles = existingProfile.length > 0;
     return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "OTP verified successfully", {
         user: updatedUser,
-        hasProfiles: true,
+        hasProfiles,
         ...tokens,
+    }));
+});
+export const resendOTP = asyncHandler(async (req, res) => {
+    const { phone } = req.body;
+    if (!phone) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Phone number is required");
+    }
+    // 🔹 Check user exists
+    const [existingUser] = await db
+        .select({ id: Users.id })
+        .from(Users)
+        .where(eq(Users.phone, phone))
+        .limit(1);
+    if (!existingUser) {
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found");
+    }
+    // 🔹 Generate new OTP
+    const otp = crypto.randomInt(1000, 9999).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    // 🔹 Update OTP
+    await db
+        .update(Users)
+        .set({
+        otp,
+        expiresAt,
+        updatedAt: new Date(),
+    })
+        .where(eq(Users.phone, phone));
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "OTP resent successfully", {
+        otp,
     }));
 });
 export const refreshToken = asyncHandler(async (req, res) => {
@@ -102,7 +124,9 @@ export const refreshToken = asyncHandler(async (req, res) => {
         role: payload.role,
     });
     setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
-    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Tokens refreshed successfully", tokens));
+    return res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Tokens refreshed successfully", tokens));
 });
 export const logout = asyncHandler(async (_req, res) => {
     clearAuthCookies(res);
@@ -111,18 +135,36 @@ export const logout = asyncHandler(async (_req, res) => {
         .json(new ApiResponse(HTTP_STATUS.OK, "Logged out successfully"));
 });
 // ================= CREATE PROFILE =================
+const normalizeToArray = (value) => {
+    if (!value)
+        return [];
+    if (Array.isArray(value))
+        return value;
+    if (typeof value === "string") {
+        try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [value];
+        }
+        catch {
+            return [value];
+        }
+    }
+    return [];
+};
+const cleanUUIDArray = (arr) => {
+    return arr.filter((id) => isUUID(id));
+};
 export const createProfile = asyncHandler(async (req, res) => {
     const userId = req.user?.id;
     if (!userId) {
         throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Please login first");
     }
-    const { profileName, profileImg, profile_role = "ADULT", device_type = "UNKNOWN", genresIds = [], languagesIds = [], 
-    // First profile ke liye extra fields
-    email, dob, } = req.body;
+    const { profileName, profileImg, profile_role = "ADULT", device_type = "UNKNOWN", email, dob, } = req.body;
+    const genresIds = cleanUUIDArray(normalizeToArray(req.body.genresIds));
+    const languagesIds = cleanUUIDArray(normalizeToArray(req.body.languagesIds));
     if (!profileName) {
         throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Profile name is required");
     }
-    // User exists check
     const [userExists] = await db
         .select({ id: Users.id })
         .from(Users)
@@ -131,13 +173,11 @@ export const createProfile = asyncHandler(async (req, res) => {
     if (!userExists) {
         throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found");
     }
-    // Existing profiles count check karo
     const existingProfiles = await db
         .select({ id: profiles.id })
         .from(profiles)
         .where(eq(profiles.userId, userId));
     const isFirstProfile = existingProfiles.length === 0;
-    // First profile hai toh email & dob required hain
     if (isFirstProfile) {
         if (!email) {
             throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Email is required for the first profile");
@@ -145,7 +185,6 @@ export const createProfile = asyncHandler(async (req, res) => {
         if (!dob) {
             throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Date of birth is required for the first profile");
         }
-        // Users table mein email & dob update karo
         await db
             .update(Users)
             .set({
@@ -155,7 +194,8 @@ export const createProfile = asyncHandler(async (req, res) => {
         })
             .where(eq(Users.id, userId));
     }
-    // Profile insert karo
+    console.log("genresIds:", genresIds);
+    console.log("languagesIds:", languagesIds);
     const [newProfile] = await db
         .insert(profiles)
         .values({
@@ -168,9 +208,7 @@ export const createProfile = asyncHandler(async (req, res) => {
         languagesIds,
     })
         .returning();
-    return res
-        .status(HTTP_STATUS.CREATED)
-        .json(new ApiResponse(HTTP_STATUS.CREATED, isFirstProfile
+    return res.status(HTTP_STATUS.CREATED).json(new ApiResponse(HTTP_STATUS.CREATED, isFirstProfile
         ? "First profile created successfully"
         : "Profile created successfully", newProfile));
 });
@@ -210,6 +248,8 @@ export const getLanguages = asyncHandler(async (_req, res) => {
     if (!allLanguages || allLanguages.length === 0) {
         throw new ApiError(HTTP_STATUS.NOT_FOUND, "No languages found");
     }
-    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Languages fetched successfully", allLanguages));
+    return res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(HTTP_STATUS.OK, "Languages fetched successfully", allLanguages));
 });
 //# sourceMappingURL=authController.js.map

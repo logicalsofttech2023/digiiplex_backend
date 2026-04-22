@@ -19,5 +19,34 @@ router.get("/profiles", authMiddleware, authController.getProfiles);
 router.get("/genres", authController.getGenres);
 router.get("/languages", authController.getLanguages);
 
+// ===== FAQS =====
+
+router.get("/faqs", authController.getFaqs);
+router.post("/faqs", authController.createFaq);
+router.put("/faqs/:id", authController.updateFaq);
+router.delete("/faqs/:id", authController.deleteFaq);
+
+// ===== ABOUT US =====
+
+router.get("/aboutus", authController.getAboutUs);
+router.post("/aboutus", authController.createAboutUs);
+router.put("/aboutus/:id", authController.updateAboutUs);
+router.delete("/aboutus/:id", authController.deleteAboutUs);
+
+// ===== PRIVACY POLICY =====
+
+router.get("/privacypolicy", authController.getPrivacyPolicy);
+router.post("/privacypolicy", authController.createPrivacyPolicy);
+router.put("/privacypolicy/:id", authController.updatePrivacyPolicy);
+router.delete("/privacypolicy/:id", authController.deletePrivacyPolicy);
+
+// ===== TERMS & CONDITIONS =====
+
+router.get("/termsconditions", authController.getTermsConditions);
+router.post("/termsconditions", authController.createTermsConditions);
+router.put("/termsconditions/:id", authController.updateTermsConditions);
+router.delete("/termsconditions/:id", authController.deleteTermsConditions);
+
+
 
 export default router;

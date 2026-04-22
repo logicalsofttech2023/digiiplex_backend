@@ -58,3 +58,44 @@ export const profiles = authService.table("profiles", {
 }, (t) => ({
     userIdx: index("profiles_user_idx").on(t.userId),
 }));
+// faqs
+export const faqs = authService.table("faqs", {
+    id: uuid("id")
+        .default(sql `gen_random_uuid()`)
+        .primaryKey(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+    titleIdx: index("faqs_title_idx").on(t.title),
+}));
+// about us
+export const aboutUs = authService.table("about_us", {
+    id: uuid("id")
+        .default(sql `gen_random_uuid()`)
+        .primaryKey(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+// privacy policy
+export const privacyPolicy = authService.table("privacy_policy", {
+    id: uuid("id").default(sql `gen_random_uuid()`).primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export const termsConditions = authService.table("terms_conditions", {
+    id: uuid("id").default(sql `gen_random_uuid()`).primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

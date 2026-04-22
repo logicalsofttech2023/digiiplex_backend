@@ -1,7 +1,9 @@
-import path from "path";
 import { S3_CREDENTIAL } from "../constants/constant.js";
 import { BUNNY } from "../config/bunny.js";
 
+// ─────────────────────────────────────────────
+// BASIC URL BUILDERS
+// ─────────────────────────────────────────────
 export const buildS3FileUrl = (key: string) =>
   `${S3_CREDENTIAL.S3_ENDPOINT}/${S3_CREDENTIAL.S3_BUCKET}/${key}`;
 
@@ -20,14 +22,91 @@ export const extractKeyFromUrl = (url: string | null | undefined) => {
   return url;
 };
 
+// ─────────────────────────────────────────────
+// SLUG HELPER
+// "Pushpa: The Rise" → "pushpa-the-rise"
+// ─────────────────────────────────────────────
+export const toSlug = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")           // spaces → hyphens
+    .replace(/-+/g, "-");           // collapse multiple hyphens
+
+// ─────────────────────────────────────────────
+// PATH CONTEXT
+// All info needed to build S3 paths
+// ─────────────────────────────────────────────
+export interface StoragePathContext {
+  creatorEmail: string;   // from Users.email  e.g. "john@example.com"
+  category: string;       // upload.type       e.g. "MOVIE" | "SERIES"
+  genreName: string;      // genres.name       e.g. "Action"
+  movieTitle: string;     // upload.title      e.g. "Pushpa: The Rise"
+  uploadId: string;       // upload.id (uuid)
+}
+
+// ─────────────────────────────────────────────
+// SEGMENT BUILDERS (internal)
+// ─────────────────────────────────────────────
+const buildSegments = (ctx: StoragePathContext) => ({
+  creator: toSlug(ctx.creatorEmail.split("@")[0]),   // "john"
+  category: toSlug(ctx.category),                     // "movie"
+  genre: toSlug(ctx.genreName),                       // "action"
+  title: toSlug(ctx.movieTitle),                      // "pushpa-the-rise"
+  uploadId: ctx.uploadId,
+});
+
+// ─────────────────────────────────────────────
+// ORIGINAL FILE KEY
+// Used when creator uploads raw file to S3
+//
+// john/movie/action/Original/pushpa-the-rise/{uploadId}/MAIN/original-{ts}.mp4
+// john/movie/action/Original/pushpa-the-rise/{uploadId}/TRAILER/original-{ts}.mp4
+// john/movie/action/Original/pushpa-the-rise/{uploadId}/THUMBNAIL/thumbnail-{ts}.jpg
+// ─────────────────────────────────────────────
+export const buildOriginalVideoKey = (
+  ctx: StoragePathContext,
+  assetRole: "MAIN" | "TRAILER",
+) => {
+  const s = buildSegments(ctx);
+  return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/${assetRole}/original-${Date.now()}.mp4`;
+};
+
+export const buildOriginalThumbnailKey = (ctx: StoragePathContext) => {
+  const s = buildSegments(ctx);
+  return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/THUMBNAIL/thumbnail-${Date.now()}.jpg`;
+};
+
+// ─────────────────────────────────────────────
+// PROCESSING PREFIX
+// Used by worker to upload HLS segments
+//
+// john/movie/action/Processing/pushpa-the-rise/{uploadId}/MAIN/
+// john/movie/action/Processing/pushpa-the-rise/{uploadId}/TRAILER/
+// ─────────────────────────────────────────────
+export const buildProcessingPrefix = (
+  ctx: StoragePathContext,
+  assetRole: "MAIN" | "TRAILER",
+) => {
+  const s = buildSegments(ctx);
+  return `${s.creator}/${s.category}/${s.genre}/Processing/${s.title}/${s.uploadId}/${assetRole}`;
+};
+
+// ─────────────────────────────────────────────
+// PROCESSING ASSET PREFIX (legacy compat)
+// Kept so existing worker call still works if needed
+// ─────────────────────────────────────────────
 export const buildProcessingAssetPrefix = (
   sourceKey: string,
-  assetType: string,
+  assetRole: string,
 ) => {
   const normalizedKey = sourceKey.replace(/\\/g, "/");
-  const processingBase = path.posix.dirname(
-    normalizedKey.replace("/Original/", "/Processing/"),
-  );
-
-  return `${processingBase}/${assetType}`;
+  const withProcessing = normalizedKey.replace("/Original/", "/Processing/");
+  // Strip filename, replace assetRole folder
+  const parts = withProcessing.split("/");
+  // Remove last segment (filename) and assetRole folder
+  // structure: creator/category/genre/Processing/title/uploadId/ASSETROLE/filename
+  parts.splice(-2, 2); // remove "ASSETROLE/filename"
+  return `${parts.join("/")}/${assetRole}`;
 };

@@ -2,318 +2,376 @@ import { Request, Response } from "express";
 import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
-  DeleteObjectCommand,
   DeleteObjectsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { asc, desc, eq, inArray } from "drizzle-orm";
-import { db } from "../config/db.js";
+import { and, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
+// import { db } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { HTTP_STATUS, S3_CREDENTIAL } from "../constants/constant.js";
 import { videoQueue } from "../config/queue.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { buildS3FileUrl, buildCdnFileUrl, extractKeyFromUrl } from "../utils/storagePath.js";
-import { casts, movieStatusEnum, movies, videoQualities, videos } from "../db/schema.js";
+import {
+  buildS3FileUrl,
+  buildCdnFileUrl,
+  buildOriginalVideoKey,
+  buildOriginalThumbnailKey,
+  buildProcessingPrefix,
+  StoragePathContext,
+} from "../utils/storagePath.js";
+import {
+  db,
+  uploads,
+  uploadAssets,
+  uploadSessions,
+  genres,
+  Users,
+} from "@digiiplex6112/db";
 
+const resolveStorageContext = async (
+  creatorId: string,
+  uploadId: string,
+  title: string,
+  type: string | null,
+  genreId: string | null,
+): Promise<StoragePathContext> => {
+  const user = await db.query.Users.findFirst({
+    where: eq(Users.id, creatorId),
+    columns: { email: true },
+  });
+  if (!user) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Creator not found");
 
-
-type MovieRow = typeof movies.$inferSelect;
-type VideoRow = typeof videos.$inferSelect;
-type CastRow = typeof casts.$inferSelect;
-type VideoQualityRow = typeof videoQualities.$inferSelect;
-
-const getMovieAggregate = async (
-  where: { id?: string; slug?: string },
-  qualityOrder: "createdAt" | "quality" = "createdAt",
-) => {
-  const movie = where.id
-    ? await db.query.movies.findFirst({ where: eq(movies.id, where.id) })
-    : await db.query.movies.findFirst({ where: eq(movies.slug, where.slug ?? "") });
-
-  if (!movie) {
-    return null;
+  let genreName = "general";
+  if (genreId) {
+    const genre = await db.query.genres.findFirst({
+      where: eq(genres.id, genreId),
+      columns: { name: true },
+    });
+    if (genre) genreName = genre.name;
   }
-
-  const [castRows, videoRows] = await Promise.all([
-    db
-      .select({ id: casts.id, name: casts.name, movieId: casts.movieId })
-      .from(casts)
-      .where(eq(casts.movieId, movie.id))
-      .orderBy(asc(casts.name)),
-    db
-      .select()
-      .from(videos)
-      .where(eq(videos.movieId, movie.id))
-      .orderBy(asc(videos.createdAt)),
-  ]);
-
-  const qualityRows = videoRows.length
-    ? await db
-        .select()
-        .from(videoQualities)
-        .where(inArray(videoQualities.videoId, videoRows.map((video) => video.id)))
-        .orderBy(
-          qualityOrder === "quality"
-            ? asc(videoQualities.quality)
-            : asc(videoQualities.createdAt),
-        )
-    : [];
-
-  const qualityMap = new Map<string, VideoQualityRow[]>();
-  for (const quality of qualityRows) {
-    const current = qualityMap.get(quality.videoId) ?? [];
-    current.push(quality);
-    qualityMap.set(quality.videoId, current);
-  }
-
-  const hydratedVideos = videoRows.map((video) => ({
-    ...video,
-    qualities: (qualityMap.get(video.id) ?? []).map((quality) => ({
-      id: quality.id,
-      quality: quality.quality,
-      url: quality.url,
-      bitrate: quality.bitrate,
-    })),
-  }));
 
   return {
-    ...movie,
-    cast: castRows.map((cast) => ({ id: cast.id, name: cast.name })),
-    videos: hydratedVideos,
+    creatorEmail: user.email as string,
+    category: type ?? "uncategorized",
+    genreName,
+    movieTitle: title,
+    uploadId,
   };
 };
 
-const hydrateMovies = async () => {
-  const movieRows = await db.select().from(movies).orderBy(desc(movies.createdAt));
+const initiateMultipartUpload = async (
+  ctx: StoragePathContext,
+  assetRole: "MAIN" | "TRAILER",
+) => {
+  const key = buildOriginalVideoKey(ctx, assetRole);
 
-  const results = [];
-  for (const movie of movieRows) {
-    const hydrated = await getMovieAggregate({ id: movie.id }, "quality");
-    if (hydrated) {
-      results.push(hydrated);
-    }
-  }
-
-  return results;
-};
-
-export const createMovieUpload = asyncHandler(async (req: Request, res: Response) => {
-  const {
-    title,
-    shortDescription,
-    description,
-    slug,
-    genres: rawGenres,
-    language,
-    releaseYear,
-    ageRating,
-    duration,
-    rating,
-  } = req.body;
-
-  if (
-    !title ||
-    !description ||
-    !slug ||
-    !rawGenres ||
-    !language ||
-    !releaseYear ||
-    !duration ||
-    !shortDescription ||
-    !ageRating ||
-    !rating
-  ) {
-    throw new ApiError(
-      HTTP_STATUS.BAD_REQUEST,
-      "All required fields must be provided",
-    );
-  }
-
-  const genresInput = Array.isArray(rawGenres) ? rawGenres : [rawGenres];
-  const existingMovie = await db.query.movies.findFirst({
-    where: eq(movies.slug, slug),
+  const command = new CreateMultipartUploadCommand({
+    Bucket: S3_CREDENTIAL.S3_BUCKET,
+    Key: key,
+    ContentType: "video/mp4",
+    ACL: "public-read",
   });
 
-  if (existingMovie) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Slug already exists");
-  }
+  const response = await s3.send(command);
+  return { s3UploadId: response.UploadId, key };
+};
 
-  const movie = await db.transaction(async (tx) => {
-    const [createdMovie] = await tx
-      .insert(movies)
+const initiateThumbnailUpload = async (ctx: StoragePathContext) => {
+  const key = buildOriginalThumbnailKey(ctx);
+
+  const command = new PutObjectCommand({
+    Bucket: S3_CREDENTIAL.S3_BUCKET,
+    Key: key,
+    ContentType: "image/jpeg",
+    ACL: "public-read",
+  });
+
+  const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3000 });
+  return { presignedUrl, fileUrl: buildCdnFileUrl(key), key };
+};
+
+// ─────────────────────────────────────────────
+// CONTROLLER: Initialize Upload
+// ─────────────────────────────────────────────
+
+export const createUpload = asyncHandler(
+  async (req: Request, res: Response) => {
+    const {
+      title,
+      description,
+      type,
+      genreId,
+      languageId,
+      defaultLanguage,
+      metadata,
+    } = req.body;
+
+    const creatorId = (req as any).user?.id;
+    if (!creatorId)
+      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
+    if (!title)
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Title is required");
+
+    // 1. Create upload record
+    const [upload] = await db
+      .insert(uploads)
       .values({
+        creatorId,
         title,
-        description,
-        slug,
-        genres: genresInput,
-        language,
-        releaseYear: Number(releaseYear),
-        duration: Number(duration),
-        shortDescription,
-        ageRating,
-        rating: String(rating),
-        status: movieStatusEnum.enumValues[0],
-        updatedAt: new Date(),
+        description: description ?? null,
+        type: type ?? null,
+        genreId: genreId ?? null,
+        languageId: languageId ?? null,
+        defaultLanguage: defaultLanguage ?? null,
+        status: "INITIATED",
+        metadata: metadata ?? {},
       })
       .returning();
 
-    return createdMovie;
-  });
+    // 2. Resolve storage context (email + genre name from DB)
+    const ctx = await resolveStorageContext(
+      creatorId,
+      upload.id,
+      title,
+      type ?? null,
+      genreId ?? null,
+    );
 
-  const createMultipart = async (type: string) => {
-    const key = `CreatorName1/CategoryName/Genre/Original/MovieName/${movie.id}/${type}-${Date.now()}.mp4`;
-    const command = new CreateMultipartUploadCommand({
-      Bucket: S3_CREDENTIAL.S3_BUCKET,
-      Key: key,
-      ContentType: "video/mp4",
-      ACL: "public-read",
-    });
+    // 3. Initiate S3 uploads
+    const [videoUpload, trailerUpload, thumbnailUpload] = await Promise.all([
+      initiateMultipartUpload(ctx, "MAIN"),
+      initiateMultipartUpload(ctx, "TRAILER"),
+      initiateThumbnailUpload(ctx),
+    ]);
 
-    const response = await s3.send(command);
-
-    return {
-      uploadId: response.UploadId,
-      key,
-    };
-  };
-
-  const createThumbnail = async () => {
-    const key = `CreatorName1/CategoryName/Genre/Original/MovieName/${movie.id}/thumbnail-${Date.now()}.jpg`;
-    const command = new PutObjectCommand({
-      Bucket: S3_CREDENTIAL.S3_BUCKET,
-      Key: key,
-      ContentType: "image/jpeg",
-      ACL: "public-read",
-    });
-
-    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3000 });
-
-    return {
-      uploadUrl,
-      fileUrl: buildCdnFileUrl(key),
-      key,
-    };
-  };
-
-  const [video, trailer, thumbnail] = await Promise.all([
-    createMultipart("video"),
-    createMultipart("trailer"),
-    createThumbnail(),
-  ]);
-
-  res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Upload initialized", {
-      movieId: movie.id,
-      upload: {
-        video,
-        trailer,
-        thumbnail,
+    // 4. Insert uploadAssets
+    await db.insert(uploadAssets).values([
+      {
+        uploadId: upload.id,
+        assetType: "VIDEO",
+        assetRole: "MAIN",
+        fileKey: videoUpload.key,
+        status: "PENDING_UPLOAD",
       },
-    }),
-  );
-});
+      {
+        uploadId: upload.id,
+        assetType: "VIDEO",
+        assetRole: "TRAILER",
+        fileKey: trailerUpload.key,
+        status: "PENDING_UPLOAD",
+      },
+      {
+        uploadId: upload.id,
+        assetType: "IMAGE",
+        assetRole: "THUMBNAIL",
+        fileKey: thumbnailUpload.key,
+        status: "PENDING_UPLOAD",
+      },
+    ]);
+
+    // 5. Create upload sessions for multipart uploads
+    const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await db.insert(uploadSessions).values([
+      {
+        uploadId: upload.id,
+        userId: creatorId,
+        fileKey: videoUpload.key,
+        expiresAt: sessionExpiresAt,
+      },
+      {
+        uploadId: upload.id,
+        userId: creatorId,
+        fileKey: trailerUpload.key,
+        expiresAt: sessionExpiresAt,
+      },
+    ]);
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload initialized", {
+        uploadId: upload.id,
+        upload: {
+          video: { s3UploadId: videoUpload.s3UploadId, key: videoUpload.key },
+          trailer: {
+            s3UploadId: trailerUpload.s3UploadId,
+            key: trailerUpload.key,
+          },
+          thumbnail: {
+            presignedUrl: thumbnailUpload.presignedUrl,
+            fileUrl: thumbnailUpload.fileUrl,
+            key: thumbnailUpload.key,
+          },
+        },
+      }),
+    );
+  },
+);
 
 export const getMultipartSignedUrl = asyncHandler(
   async (req: Request, res: Response) => {
-    const { key, uploadId, partNumber } = req.body;
+    const { key, s3UploadId, partNumber } = req.body;
 
-    if (!key || !uploadId || !partNumber) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Missing fields");
+    if (!key || !s3UploadId || !partNumber) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "key, s3UploadId and partNumber are required",
+      );
     }
 
     const command = new UploadPartCommand({
       Bucket: S3_CREDENTIAL.S3_BUCKET,
       Key: key,
-      UploadId: uploadId,
-      PartNumber: partNumber,
+      UploadId: s3UploadId,
+      PartNumber: Number(partNumber),
     });
 
     const url = await getSignedUrl(s3, command, { expiresIn: 3000 });
-    res.status(HTTP_STATUS.OK).json({ url });
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(new ApiResponse(HTTP_STATUS.OK, "Signed URL generated", { url }));
   },
 );
 
 export const completeMultipartUpload = asyncHandler(
   async (req: Request, res: Response) => {
-    const { key, uploadId, parts, movieId, type } = req.body;
+    const { key, s3UploadId, parts, uploadId, assetRole } = req.body;
 
-    if (!key || !uploadId || !parts || !movieId || !type) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Missing fields");
+    if (!key || !s3UploadId || !parts || !uploadId || !assetRole) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "key, s3UploadId, parts, uploadId and assetRole are required",
+      );
     }
 
+    // 1. Fetch upload
+    const upload = await db.query.uploads.findFirst({
+      where: eq(uploads.id, uploadId),
+    });
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    // 2. Complete S3 multipart
     await s3.send(
       new CompleteMultipartUploadCommand({
         Bucket: S3_CREDENTIAL.S3_BUCKET,
         Key: key,
-        UploadId: uploadId,
-        MultipartUpload: {
-          Parts: parts,
-        },
+        UploadId: s3UploadId,
+        MultipartUpload: { Parts: parts },
       }),
     );
 
     const fileUrl = buildS3FileUrl(key);
-    const [movie] = await db
-      .update(movies)
-      .set({
-        ...(type === "video" ? { videoUrl: fileUrl } : { trailerUrl: fileUrl }),
-        updatedAt: new Date(),
-      })
-      .where(eq(movies.id, movieId))
+
+    // 3. Resolve processing prefix for worker
+    const ctx = await resolveStorageContext(
+      upload.creatorId,
+      upload.id,
+      upload.title,
+      upload.type ?? null,
+      upload.genreId ?? null,
+    );
+    const processingPrefix = buildProcessingPrefix(
+      ctx,
+      assetRole as "MAIN" | "TRAILER",
+    );
+
+    // 4. Update uploadAsset → UPLOADED
+    const [updatedAsset] = await db
+      .update(uploadAssets)
+      .set({ status: "UPLOADED", updatedAt: new Date() })
+      .where(
+        and(
+          eq(uploadAssets.uploadId, uploadId),
+          eq(uploadAssets.assetRole, assetRole),
+        ),
+      )
       .returning();
 
+    if (!updatedAsset)
+      throw new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        "Upload asset record not found",
+      );
+
+    // 5. Update upload → IN_REVIEW
+    await db
+      .update(uploads)
+      .set({ status: "IN_REVIEW", updatedAt: new Date() })
+      .where(eq(uploads.id, uploadId));
+
+    // 6. Enqueue transcoding job (pass processingPrefix so worker doesn't need to recompute)
     const queueJob = await videoQueue.add(
       "convert-to-hls",
       {
-        videoUrl: fileUrl,
-        movieId,
+        fileUrl,
+        uploadId,
+        uploadAssetId: updatedAsset.id,
         sourceKey: key,
-        assetType: type,
+        assetRole,
+        processingPrefix,
       },
       {
-        jobId: `${movieId}:${type}:${Date.now()}`,
+        jobId: `${uploadId}:${assetRole}:${Date.now()}`,
+        priority: assetRole === "MAIN" ? 1 : 5,
       },
     );
 
-    res.status(HTTP_STATUS.OK).json(
-      new ApiResponse(HTTP_STATUS.OK, "Upload complete", {
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload complete, transcoding queued", {
         fileUrl,
         jobId: queueJob.id,
-        movie,
+        uploadAssetId: updatedAsset.id,
+        processingPrefix,
       }),
     );
   },
 );
 
-export const saveThumbnail = asyncHandler(async (req: Request, res: Response) => {
-  const { movieId, thumbnailUrl } = req.body;
-
-  if (!movieId || !thumbnailUrl) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Missing fields");
-  }
-
-  const [movie] = await db
-    .update(movies)
-    .set({
-      thumbnailUrl,
-      updatedAt: new Date(),
-    })
-    .where(eq(movies.id, movieId))
-    .returning();
-
-  res
-    .status(HTTP_STATUS.OK)
-    .json(new ApiResponse(HTTP_STATUS.OK, "Thumbnail saved", movie));
-});
-
-export const getVideoProcessingStatus = asyncHandler(
+export const saveThumbnail = asyncHandler(
   async (req: Request, res: Response) => {
-    const { movieId, assetType } = req.params;
+    const { uploadId, thumbnailUrl } = req.body;
+
+    if (!uploadId || !thumbnailUrl) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "uploadId and thumbnailUrl are required",
+      );
+    }
+
+    const [updatedAsset] = await db
+      .update(uploadAssets)
+      .set({
+        status: "UPLOADED",
+        masterPlaylistUrl: thumbnailUrl,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(uploadAssets.uploadId, uploadId),
+          eq(uploadAssets.assetRole, "THUMBNAIL"),
+        ),
+      )
+      .returning();
+
+    if (!updatedAsset)
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Thumbnail asset not found");
+
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(
+        new ApiResponse(HTTP_STATUS.OK, "Thumbnail saved", {
+          asset: updatedAsset,
+        }),
+      );
+  },
+);
+
+export const getProcessingStatus = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { uploadId, assetRole } = req.params;
     const requestedJobId =
       typeof req.query.jobId === "string" ? req.query.jobId : undefined;
 
@@ -330,16 +388,14 @@ export const getVideoProcessingStatus = asyncHandler(
         ])
       )
         .filter(
-          (currentJob) =>
-            currentJob.data.movieId === movieId &&
-            currentJob.data.assetType === assetType,
+          (j) => j.data.uploadId === uploadId && j.data.assetRole === assetRole,
         )
         .sort((a, b) => b.timestamp - a.timestamp)[0];
 
     if (!job) {
-      return res.status(HTTP_STATUS.NOT_FOUND).json(
-        new ApiResponse(HTTP_STATUS.NOT_FOUND, "Job not found", null),
-      );
+      return res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(new ApiResponse(HTTP_STATUS.NOT_FOUND, "Job not found", null));
     }
 
     const state = await job.getState();
@@ -349,179 +405,176 @@ export const getVideoProcessingStatus = asyncHandler(
         ? progress
         : { stage: state, percent: progress ?? 0 };
 
+    const asset = await db.query.uploadAssets.findFirst({
+      where: and(
+        eq(uploadAssets.uploadId, uploadId as string),
+        eq(uploadAssets.assetRole, assetRole as any),
+      ),
+    });
+
     return res.status(HTTP_STATUS.OK).json(
       new ApiResponse(HTTP_STATUS.OK, "Status fetched", {
         jobId: job.id,
         state,
         progress: progressData,
         failedReason: state === "failed" ? job.failedReason : undefined,
+        assetStatus: asset?.status ?? null,
+        masterPlaylistUrl: asset?.masterPlaylistUrl ?? null,
       }),
     );
   },
 );
 
-export const deleteMovie = asyncHandler(async (req: Request, res: Response) => {
-  const movieId =
-    typeof req.query.movieId === "string" ? req.query.movieId : undefined;
+export const deleteUpload = asyncHandler(
+  async (req: Request, res: Response) => {
+    const uploadId =
+      typeof req.query.uploadId === "string" ? req.query.uploadId : undefined;
+    if (!uploadId)
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "uploadId is required");
 
-  if (!movieId) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Movie ID is required");
-  }
+    const upload = await db.query.uploads.findFirst({
+      where: eq(uploads.id, uploadId),
+    });
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
 
-  const movie = await getMovieAggregate({ id: movieId });
+    // Build S3 prefixes and delete both Original + Processing folders
+    const ctx = await resolveStorageContext(
+      upload.creatorId,
+      upload.id,
+      upload.title,
+      upload.type ?? null,
+      upload.genreId ?? null,
+    );
 
-  if (!movie) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
-  }
+    await Promise.all([
+      deleteFolderByPrefix(
+        buildProcessingPrefix(ctx, "MAIN").replace("/MAIN", "/"),
+      ),
+      deleteFolderByPrefix(
+        buildOriginalVideoKey(ctx, "MAIN").replace(/MAIN\/.*$/, ""),
+      ),
+    ]);
 
-  const deleteFolderByPrefix = async (prefix: string) => {
-    let continuationToken: string | undefined;
+    // Soft delete
+    await db
+      .update(uploads)
+      .set({ deletedFlg: true, status: "CANCELLED", updatedAt: new Date() })
+      .where(eq(uploads.id, uploadId));
+    await db
+      .update(uploadAssets)
+      .set({ deletedFlg: true, updatedAt: new Date() })
+      .where(eq(uploadAssets.uploadId, uploadId));
 
-    do {
-      const listed = await s3.send(
-        new ListObjectsV2Command({
-          Bucket: S3_CREDENTIAL.S3_BUCKET,
-          Prefix: prefix,
-          ContinuationToken: continuationToken,
-        }),
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(
+        new ApiResponse(
+          HTTP_STATUS.OK,
+          "Upload and files deleted successfully",
+          {},
+        ),
+      );
+  },
+);
+
+export const getUploadById = asyncHandler(
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.id;
+    if (!uploadId)
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "uploadId is required");
+
+    const upload = await db.query.uploads.findFirst({
+      where: and(
+        eq(uploads.id, uploadId as string),
+        eq(uploads.deletedFlg, false),
+      ),
+    });
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    const assets = await db
+      .select()
+      .from(uploadAssets)
+      .where(
+        and(
+          eq(uploadAssets.uploadId, uploadId as string),
+          eq(uploadAssets.deletedFlg, false),
+        ),
       );
 
-      if (listed.Contents?.length) {
-        await s3.send(
-          new DeleteObjectsCommand({
-            Bucket: S3_CREDENTIAL.S3_BUCKET,
-            Delete: {
-              Objects: listed.Contents
-                .map((item) => item.Key)
-                .filter((item): item is string => Boolean(item))
-                .map((item) => ({ Key: item })),
-            },
-          }),
-        );
-      }
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(
+        new ApiResponse(HTTP_STATUS.OK, "Upload fetched", {
+          upload: { ...upload, assets },
+        }),
+      );
+  },
+);
 
-      continuationToken = listed.IsTruncated
-        ? listed.NextContinuationToken
-        : undefined;
-    } while (continuationToken);
-  };
+export const getAllUploads = asyncHandler(
+  async (req: Request, res: Response) => {
+    const creatorId = (req as any).user?.id;
+    if (!creatorId)
+      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
 
-  const deleteSingleObject = async (key: string) => {
-    await s3.send(
-      new DeleteObjectCommand({
-        Bucket: S3_CREDENTIAL.S3_BUCKET,
-        Key: key,
+    const uploadRows = await db
+      .select()
+      .from(uploads)
+      .where(
+        and(eq(uploads.creatorId, creatorId), eq(uploads.deletedFlg, false)),
+      )
+      .orderBy(desc(uploads.createdAt));
+
+    const result = await Promise.all(
+      uploadRows.map(async (upload) => {
+        const assets = await db
+          .select()
+          .from(uploadAssets)
+          .where(
+            and(
+              eq(uploadAssets.uploadId, upload.id),
+              eq(uploadAssets.deletedFlg, false),
+            ),
+          );
+        return { ...upload, assets };
       }),
     );
-  };
 
-  const getOriginalPrefixFromProcessingUrl = (
-    url: string | null | undefined,
-  ): string | null => {
-    if (!url) return null;
-    const key = extractKeyFromUrl(url);
-    if (!key) return null;
+    return res
+      .status(HTTP_STATUS.OK)
+      .json(
+        new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", { uploads: result }),
+      );
+  },
+);
 
-    return key.replace(/\/[^/]+$/, "/").replace("/Processing/", "/Original/");
-  };
+const deleteFolderByPrefix = async (prefix: string) => {
+  let continuationToken: string | undefined;
 
-  const getProcessingPrefix = (
-    url: string | null | undefined,
-  ): string | null => {
-    if (!url) return null;
-    const key = extractKeyFromUrl(url);
-    if (!key || !key.includes("/Processing/")) return null;
+  do {
+    const listed = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: S3_CREDENTIAL.S3_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
 
-    return key.replace(/\/[^/]+$/, "/");
-  };
-
-  const deletePromises: Promise<void>[] = [];
-
-  if (movie.videoUrl) {
-    const processingPrefix = getProcessingPrefix(movie.videoUrl);
-    const originalPrefix = getOriginalPrefixFromProcessingUrl(movie.videoUrl);
-
-    if (processingPrefix) deletePromises.push(deleteFolderByPrefix(processingPrefix));
-    if (originalPrefix) deletePromises.push(deleteFolderByPrefix(originalPrefix));
-  }
-
-  if (movie.trailerUrl) {
-    const processingPrefix = getProcessingPrefix(movie.trailerUrl);
-    const originalPrefix = getOriginalPrefixFromProcessingUrl(movie.trailerUrl);
-
-    if (processingPrefix) deletePromises.push(deleteFolderByPrefix(processingPrefix));
-    if (originalPrefix) deletePromises.push(deleteFolderByPrefix(originalPrefix));
-  }
-
-  if (movie.thumbnailUrl) {
-    const key = extractKeyFromUrl(movie.thumbnailUrl);
-    if (key) {
-      deletePromises.push(deleteSingleObject(key));
+    if (listed.Contents?.length) {
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: S3_CREDENTIAL.S3_BUCKET,
+          Delete: {
+            Objects: listed.Contents.map((item) => item.Key)
+              .filter((k): k is string => Boolean(k))
+              .map((k) => ({ Key: k })),
+          },
+        }),
+      );
     }
-  }
 
-  await Promise.all(deletePromises);
-  await db.delete(movies).where(eq(movies.id, movieId));
-
-  res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Movie and files deleted successfully", {}),
-  );
-});
-
-export const getMovieById = asyncHandler(async (req: Request, res: Response) => {
-  const movieId =
-    typeof req.params.id === "string" ? req.params.id : req.params.id?.[0];
-
-  if (!movieId) {
-    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Movie ID is required");
-  }
-
-  const movie = await getMovieAggregate({ id: movieId });
-
-  if (!movie) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
-  }
-
-  const movieVideos = movie.videos.filter((video: VideoRow) => video.type === "MOVIE");
-  const trailers = movie.videos.filter((video: VideoRow) => video.type === "TRAILER");
-
-  return res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Movie fetched successfully", {
-      movie: {
-        ...movie,
-        videos: movieVideos,
-        trailers,
-      },
-    }),
-  );
-});
-
-export const getAllMovies = asyncHandler(async (_req: Request, res: Response) => {
-  const movieRows = await hydrateMovies();
-
-  return res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Movies fetched", { movies: movieRows }),
-  );
-});
-
-export const getMovieBySlug = asyncHandler(async (req: Request, res: Response) => {
-  const slug = req.params.slug as string;
-  const movie = await getMovieAggregate({ slug });
-
-  if (!movie) {
-    throw new ApiError(HTTP_STATUS.NOT_FOUND, "Movie not found");
-  }
-
-  const movieVideos = movie.videos.filter((video: VideoRow) => video.type === "MOVIE");
-  const trailers = movie.videos.filter((video: VideoRow) => video.type === "TRAILER");
-
-  return res.status(HTTP_STATUS.OK).json(
-    new ApiResponse(HTTP_STATUS.OK, "Movie fetched successfully", {
-      movie: {
-        ...movie,
-        videos: movieVideos,
-        trailers,
-      },
-    }),
-  );
-});
+    continuationToken = listed.IsTruncated
+      ? listed.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+};

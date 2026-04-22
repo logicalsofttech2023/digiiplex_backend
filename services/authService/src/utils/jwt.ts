@@ -1,5 +1,5 @@
-import { createPrivateKey, createPublicKey, type KeyObject } from "crypto";
-import { decode, V2 } from "paseto";
+import { createPrivateKey } from "crypto";
+import jwt, { type JwtPayload, type SignOptions } from "jsonwebtoken";
 import ApiError from "./ApiError.js";
 import { HTTP_STATUS } from "../constants/constant.js";
 import {
@@ -17,8 +17,8 @@ interface TokenPayload {
   id: string;
   role: string;
   tokenType: TokenType;
-  iat?: string;
-  exp?: string;
+  iat?: number;
+  exp?: number;
 }
 
 interface ActiveKeyResponse {
@@ -77,26 +77,13 @@ const getPublicKeys = async (): Promise<PublicKeyResponse[]> => {
   return response.keys;
 };
 
-const parseFooter = (footer?: Buffer): { kid?: string } => {
-  if (!footer) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(footer.toString()) as { kid?: string };
-  } catch {
-    return {};
-  }
-};
-
-const getPublicKeyForToken = async (token: string): Promise<KeyObject> => {
-  const decoded = decode(token);
-  const footer = parseFooter(decoded.footer);
+const getPublicKeyForToken = async (token: string): Promise<string> => {
+  const decoded = jwt.decode(token, { complete: true });
+  const kid = typeof decoded === "object" ? decoded?.header?.kid : undefined;
   const keys = await getPublicKeys();
-  const matchedKey =
-    keys.find((key) => key.kid === footer.kid) || (await getActiveKey());
+  const matchedKey = keys.find((key) => key.kid === kid) || (await getActiveKey());
 
-  return createPublicKey(matchedKey.publicKey);
+  return matchedKey.publicKey;
 };
 
 const signToken = async (
@@ -107,16 +94,17 @@ const signToken = async (
   const activeKey = await getActiveKey();
   const privateKey = createPrivateKey(activeKey.privateKey);
 
-  return V2.sign(
+  return jwt.sign(
     {
       ...payload,
       tokenType,
     },
     privateKey,
     {
+      algorithm: "RS256",
       expiresIn,
-      footer: { kid: activeKey.kid },
-    },
+      keyid: activeKey.kid,
+    } as SignOptions,
   );
 };
 
@@ -125,7 +113,9 @@ const verifyToken = async (
   expectedType: TokenType,
 ): Promise<TokenPayload> => {
   const publicKey = await getPublicKeyForToken(token);
-  const payload = await V2.verify<TokenPayload>(token, publicKey);
+  const payload = jwt.verify(token, publicKey, {
+    algorithms: ["RS256"],
+  }) as JwtPayload & TokenPayload;
 
   if (payload.tokenType !== expectedType) {
     throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid token type");
