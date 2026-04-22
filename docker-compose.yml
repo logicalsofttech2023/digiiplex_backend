@@ -11,6 +11,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./frontend/website/dist:/usr/share/nginx/html/website:ro
       - ./frontend/superadmin/dist:/usr/share/nginx/html/superadmin:ro
+      - ./frontend/admin/dist:/usr/share/nginx/html/admin:ro
+      - ./frontend/creator/dist:/usr/share/nginx/html/creator:ro
     depends_on:
       - digiplex-gateway
     networks:

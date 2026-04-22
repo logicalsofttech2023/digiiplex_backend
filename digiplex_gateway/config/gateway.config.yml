@@ -54,7 +54,16 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
@@ -70,7 +79,16 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
@@ -86,7 +104,16 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
@@ -95,7 +122,6 @@ pipelines:
           - action:
               serviceEndpoint: authService
               changeOrigin: true
-              
 
   userPipeline:
     apiEndpoints:
@@ -103,7 +129,16 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
@@ -112,7 +147,6 @@ pipelines:
           - action:
               serviceEndpoint: userService
               changeOrigin: true
-              
 
   subscriptionPipeline:
     apiEndpoints:
@@ -120,7 +154,16 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
@@ -129,7 +172,6 @@ pipelines:
           - action:
               serviceEndpoint: subscriptionService
               changeOrigin: true
-              
 
   videoPipeline:
     apiEndpoints:
@@ -137,7 +179,16 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
@@ -146,7 +197,6 @@ pipelines:
           - action:
               serviceEndpoint: videoService
               changeOrigin: true
-              
 
   streamingPipeline:
     apiEndpoints:
@@ -154,13 +204,21 @@ pipelines:
     policies:
       - cors:
           - action:
-              origin: "http://localhost:5173"
+              origin:
+                - "http://localhost:5173"
+                - "http://digiiplex.local"
+                - "http://admin.digiiplex.local"
+                - "http://superadmin.digiiplex.local"
+                - "http://creator.digiiplex.local"
+                - "http://digiiplex.com"
+                - "http://admin.digiiplex.com"
+                - "http://superadmin.digiiplex.com"
+                - "http://creator.digiiplex.com"
               methods: "GET,HEAD,PUT,PATCH,POST,DELETE"
               allowedHeaders: "Content-Type, Authorization"
               credentials: true
               optionsSuccessStatus: 200
-      - proxy: 
+      - proxy:
           - action:
               serviceEndpoint: streamingService
               changeOrigin: true
-              
