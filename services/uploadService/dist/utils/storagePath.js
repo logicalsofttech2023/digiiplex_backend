@@ -1,8 +1,5 @@
 import { S3_CREDENTIAL } from "../constants/constant.js";
 import { BUNNY } from "../config/bunny.js";
-// ─────────────────────────────────────────────
-// BASIC URL BUILDERS
-// ─────────────────────────────────────────────
 export const buildS3FileUrl = (key) => `${S3_CREDENTIAL.S3_ENDPOINT}/${S3_CREDENTIAL.S3_BUCKET}/${key}`;
 export const buildCdnFileUrl = (key) => `https://${BUNNY.VIDEO_CDN_URL}/${key}`;
 export const extractKeyFromUrl = (url) => {
@@ -16,65 +13,83 @@ export const extractKeyFromUrl = (url) => {
         return url.slice(hetznerBase.length);
     return url;
 };
-// ─────────────────────────────────────────────
-// SLUG HELPER
-// "Pushpa: The Rise" → "pushpa-the-rise"
-// ─────────────────────────────────────────────
 export const toSlug = (value) => value
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-") // spaces → hyphens
-    .replace(/-+/g, "-"); // collapse multiple hyphens
-// ─────────────────────────────────────────────
-// SEGMENT BUILDERS (internal)
-// ─────────────────────────────────────────────
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
 const buildSegments = (ctx) => ({
-    creator: toSlug(ctx.creatorEmail.split("@")[0]), // "john"
-    category: toSlug(ctx.category), // "movie"
-    genre: toSlug(ctx.genreName), // "action"
-    title: toSlug(ctx.movieTitle), // "pushpa-the-rise"
+    creator: toSlug(ctx.creatorEmail.split("@")[0]),
+    category: toSlug(ctx.category),
+    genre: toSlug(ctx.genreName),
+    title: toSlug(ctx.movieTitle),
     uploadId: ctx.uploadId,
 });
-// ─────────────────────────────────────────────
-// ORIGINAL FILE KEY
-// Used when creator uploads raw file to S3
-//
-// john/movie/action/Original/pushpa-the-rise/{uploadId}/MAIN/original-{ts}.mp4
-// john/movie/action/Original/pushpa-the-rise/{uploadId}/TRAILER/original-{ts}.mp4
-// john/movie/action/Original/pushpa-the-rise/{uploadId}/THUMBNAIL/thumbnail-{ts}.jpg
-// ─────────────────────────────────────────────
+const buildSeriesSegment = (ctx) => {
+    if (!ctx.seasonNumber)
+        return null;
+    const season = `s${ctx.seasonNumber}`;
+    if (ctx.episodeNumber) {
+        return `${season}/e${ctx.episodeNumber}`;
+    }
+    return season;
+};
+const isSeries = (ctx) => ctx.category.toUpperCase() === "SERIES" ||
+    ctx.category.toUpperCase() === "EPISODE" ||
+    ctx.category.toUpperCase() === "PODCAST_EP";
 export const buildOriginalVideoKey = (ctx, assetRole) => {
     const s = buildSegments(ctx);
-    return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/${assetRole}/original-${Date.now()}.mp4`;
+    const ts = Date.now();
+    if (isSeries(ctx)) {
+        const seriesSegment = buildSeriesSegment(ctx);
+        if (!seriesSegment) {
+            throw new Error("seasonNumber is required for series video upload");
+        }
+        return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${seriesSegment}/${assetRole}/original-${ts}.mp4`;
+    }
+    return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/${assetRole}/original-${ts}.mp4`;
+};
+export const buildOriginalAudioKey = (ctx) => {
+    const s = buildSegments(ctx);
+    const ts = Date.now();
+    if (isSeries(ctx)) {
+        const seriesSegment = buildSeriesSegment(ctx);
+        if (!seriesSegment) {
+            throw new Error("seasonNumber is required for series audio upload");
+        }
+        return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${seriesSegment}/AUDIO/original-${ts}.mp3`;
+    }
+    return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/AUDIO/original-${ts}.mp3`;
 };
 export const buildOriginalThumbnailKey = (ctx) => {
     const s = buildSegments(ctx);
-    return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/THUMBNAIL/thumbnail-${Date.now()}.jpg`;
+    const ts = Date.now();
+    if (isSeries(ctx)) {
+        const seriesSegment = buildSeriesSegment(ctx);
+        if (!seriesSegment) {
+            throw new Error("seasonNumber is required for series thumbnail upload");
+        }
+        return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${seriesSegment}/THUMBNAIL/thumbnail-${ts}.jpg`;
+    }
+    return `${s.creator}/${s.category}/${s.genre}/Original/${s.title}/${s.uploadId}/THUMBNAIL/thumbnail-${ts}.jpg`;
 };
-// ─────────────────────────────────────────────
-// PROCESSING PREFIX
-// Used by worker to upload HLS segments
-//
-// john/movie/action/Processing/pushpa-the-rise/{uploadId}/MAIN/
-// john/movie/action/Processing/pushpa-the-rise/{uploadId}/TRAILER/
-// ─────────────────────────────────────────────
 export const buildProcessingPrefix = (ctx, assetRole) => {
     const s = buildSegments(ctx);
+    if (isSeries(ctx)) {
+        const seriesSegment = buildSeriesSegment(ctx);
+        if (!seriesSegment) {
+            throw new Error("seasonNumber is required for series processing prefix");
+        }
+        return `${s.creator}/${s.category}/${s.genre}/Processing/${s.title}/${seriesSegment}/${assetRole}`;
+    }
     return `${s.creator}/${s.category}/${s.genre}/Processing/${s.title}/${s.uploadId}/${assetRole}`;
 };
-// ─────────────────────────────────────────────
-// PROCESSING ASSET PREFIX (legacy compat)
-// Kept so existing worker call still works if needed
-// ─────────────────────────────────────────────
 export const buildProcessingAssetPrefix = (sourceKey, assetRole) => {
     const normalizedKey = sourceKey.replace(/\\/g, "/");
     const withProcessing = normalizedKey.replace("/Original/", "/Processing/");
-    // Strip filename, replace assetRole folder
     const parts = withProcessing.split("/");
-    // Remove last segment (filename) and assetRole folder
-    // structure: creator/category/genre/Processing/title/uploadId/ASSETROLE/filename
-    parts.splice(-2, 2); // remove "ASSETROLE/filename"
+    parts.splice(-2, 2);
     return `${parts.join("/")}/${assetRole}`;
 };
 //# sourceMappingURL=storagePath.js.map

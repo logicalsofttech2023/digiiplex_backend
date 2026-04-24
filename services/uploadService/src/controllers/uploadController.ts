@@ -8,7 +8,7 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { and, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 // import { db } from "../config/db.js";
 import { s3 } from "../config/s3.js";
 import { HTTP_STATUS, S3_CREDENTIAL } from "../constants/constant.js";
@@ -20,6 +20,7 @@ import {
   buildS3FileUrl,
   buildCdnFileUrl,
   buildOriginalVideoKey,
+  buildOriginalAudioKey,
   buildOriginalThumbnailKey,
   buildProcessingPrefix,
   StoragePathContext,
@@ -31,7 +32,21 @@ import {
   uploadSessions,
   genres,
   Users,
+  shows,
 } from "@digiiplex6112/db";
+
+type ContentKind =
+  | "MOVIE"
+  | "EPISODE"
+  | "SHORT"
+  | "STANDUP"
+  | "PODCAST_EP"
+  | "MUSIC_TRACK";
+
+const AUDIO_ONLY_KINDS: ContentKind[] = ["MUSIC_TRACK"];
+const HAS_TRAILER: ContentKind[] = ["MOVIE", "SHORT", "STANDUP"];
+const REQUIRES_SHOW: ContentKind[] = ["EPISODE", "PODCAST_EP", "MUSIC_TRACK"];
+const isAudioOnly = (kind: ContentKind) => AUDIO_ONLY_KINDS.includes(kind);
 
 const resolveStorageContext = async (
   creatorId: string,
@@ -39,6 +54,9 @@ const resolveStorageContext = async (
   title: string,
   type: string | null,
   genreId: string | null,
+  showId?: string | null,
+  seasonNumber?: number | null,
+  episodeNumber?: number | null,
 ): Promise<StoragePathContext> => {
   const user = await db.query.Users.findFirst({
     where: eq(Users.id, creatorId),
@@ -55,28 +73,50 @@ const resolveStorageContext = async (
     if (genre) genreName = genre.name;
   }
 
+  let resolvedTitle = title;
+  if (showId) {
+    const show = await db.query.shows.findFirst({
+      where: eq(shows.id, showId),
+      columns: { title: true },
+    });
+    if (show) resolvedTitle = show.title;
+  }
+
   return {
     creatorEmail: user.email as string,
     category: type ?? "uncategorized",
     genreName,
-    movieTitle: title,
+    movieTitle: resolvedTitle,
     uploadId,
+    showId: showId ?? null,
+    seasonNumber: seasonNumber ?? null,
+    episodeNumber: episodeNumber ?? null,
   };
 };
 
-const initiateMultipartUpload = async (
+const initiateVideoMultipart = async (
   ctx: StoragePathContext,
   assetRole: "MAIN" | "TRAILER",
 ) => {
   const key = buildOriginalVideoKey(ctx, assetRole);
-
   const command = new CreateMultipartUploadCommand({
     Bucket: S3_CREDENTIAL.S3_BUCKET,
     Key: key,
     ContentType: "video/mp4",
     ACL: "public-read",
   });
+  const response = await s3.send(command);
+  return { s3UploadId: response.UploadId, key };
+};
 
+const initiateAudioMultipart = async (ctx: StoragePathContext) => {
+  const key = buildOriginalAudioKey(ctx);
+  const command = new CreateMultipartUploadCommand({
+    Bucket: S3_CREDENTIAL.S3_BUCKET,
+    Key: key,
+    ContentType: "audio/mpeg",
+    ACL: "public-read",
+  });
   const response = await s3.send(command);
   return { s3UploadId: response.UploadId, key };
 };
@@ -95,9 +135,121 @@ const initiateThumbnailUpload = async (ctx: StoragePathContext) => {
   return { presignedUrl, fileUrl: buildCdnFileUrl(key), key };
 };
 
+const deleteFolderByPrefix = async (prefix: string) => {
+  let continuationToken: string | undefined;
+
+  do {
+    const listed = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: S3_CREDENTIAL.S3_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
+
+    if (listed.Contents?.length) {
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: S3_CREDENTIAL.S3_BUCKET,
+          Delete: {
+            Objects: listed.Contents.map((item) => item.Key)
+              .filter((k): k is string => Boolean(k))
+              .map((k) => ({ Key: k })),
+          },
+        }),
+      );
+    }
+
+    continuationToken = listed.IsTruncated
+      ? listed.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+};
+
 // ─────────────────────────────────────────────
 // CONTROLLER: Initialize Upload
 // ─────────────────────────────────────────────
+
+export const createShow = asyncHandler(async (req: Request, res: Response) => {
+  const {
+    title,
+    description,
+    type,
+    genreId,
+    languageId,
+    defaultLanguage,
+    totalSeasons,
+    metadata,
+  } = req.body;
+
+  const creatorId = (req as any).user?.id;
+  if (!creatorId) throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
+  if (!title) throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Title is required");
+  if (!type)
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Show type is required");
+
+  const [show] = await db
+    .insert(shows)
+    .values({
+      creatorId,
+      title,
+      description: description ?? null,
+      type,
+      genreId: genreId ?? null,
+      languageId: languageId ?? null,
+      defaultLanguage: defaultLanguage ?? null,
+      totalSeasons: totalSeasons ?? 1,
+      status: "DRAFT",
+      metadata: metadata ?? {},
+    })
+    .returning();
+
+  return res
+    .status(HTTP_STATUS.OK)
+    .json(new ApiResponse(HTTP_STATUS.OK, "Show created", { show }));
+});
+
+export const getShowById = asyncHandler(async (req: Request, res: Response) => {
+  const showId = req.params.id;
+  if (!showId)
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "showId is required");
+
+  const show = await db.query.shows.findFirst({
+    where: and(eq(shows.id, showId as string), eq(shows.deletedFlg, false)),
+  });
+  if (!show) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Show not found");
+
+  const episodes = await db
+    .select()
+    .from(uploads)
+    .where(
+      and(eq(uploads.showId, showId as string), eq(uploads.deletedFlg, false)),
+    )
+    .orderBy(uploads.seasonNumber, uploads.episodeNumber);
+
+  return res.status(HTTP_STATUS.OK).json(
+    new ApiResponse(HTTP_STATUS.OK, "Show fetched", {
+      show: { ...show, episodes },
+    }),
+  );
+});
+
+export const getAllShows = asyncHandler(async (req: Request, res: Response) => {
+  const creatorId = (req as any).user?.id;
+  if (!creatorId) throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
+
+  const allShows = await db
+    .select()
+    .from(shows)
+    .where(and(eq(shows.creatorId, creatorId), eq(shows.deletedFlg, false)))
+    .orderBy(desc(shows.createdAt));
+
+  return res
+    .status(HTTP_STATUS.OK)
+    .json(
+      new ApiResponse(HTTP_STATUS.OK, "Shows fetched", { shows: allShows }),
+    );
+});
 
 export const createUpload = asyncHandler(
   async (req: Request, res: Response) => {
@@ -109,6 +261,10 @@ export const createUpload = asyncHandler(
       languageId,
       defaultLanguage,
       metadata,
+      contentKind,
+      showId,
+      seasonNumber,
+      episodeNumber,
     } = req.body;
 
     const creatorId = (req as any).user?.id;
@@ -116,6 +272,25 @@ export const createUpload = asyncHandler(
       throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
     if (!title)
       throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Title is required");
+
+    if (!contentKind)
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "contentKind is required");
+
+    const kind = contentKind as ContentKind;
+
+    if (REQUIRES_SHOW.includes(kind) && !showId) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        `showId is required for ${kind}`,
+      );
+    }
+
+    if (showId) {
+      const show = await db.query.shows.findFirst({
+        where: eq(shows.id, showId),
+      });
+      if (!show) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Show not found");
+    }
 
     // 1. Create upload record
     const [upload] = await db
@@ -128,41 +303,86 @@ export const createUpload = asyncHandler(
         genreId: genreId ?? null,
         languageId: languageId ?? null,
         defaultLanguage: defaultLanguage ?? null,
+        contentKind: kind,
+        showId: showId ?? null,
+        seasonNumber: seasonNumber ?? null,
+        episodeNumber: episodeNumber ?? null,
         status: "INITIATED",
         metadata: metadata ?? {},
       })
       .returning();
 
-    // 2. Resolve storage context (email + genre name from DB)
     const ctx = await resolveStorageContext(
       creatorId,
       upload.id,
       title,
       type ?? null,
       genreId ?? null,
+      showId ?? null,
+      seasonNumber ?? null,
+      episodeNumber ?? null,
     );
 
-    // 3. Initiate S3 uploads
-    const [videoUpload, trailerUpload, thumbnailUpload] = await Promise.all([
-      initiateMultipartUpload(ctx, "MAIN"),
-      initiateMultipartUpload(ctx, "TRAILER"),
-      initiateThumbnailUpload(ctx),
-    ]);
+    const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    // 4. Insert uploadAssets
-    await db.insert(uploadAssets).values([
+    if (isAudioOnly(kind)) {
+      const audioUpload = await initiateAudioMultipart(ctx);
+      const coverArt = await initiateThumbnailUpload(ctx);
+
+      await db.insert(uploadAssets).values([
+        {
+          uploadId: upload.id,
+          assetType: "AUDIO",
+          assetRole: "MAIN",
+          fileKey: audioUpload.key,
+          status: "PENDING_UPLOAD",
+        },
+        {
+          uploadId: upload.id,
+          assetType: "IMAGE",
+          assetRole: "THUMBNAIL",
+          fileKey: coverArt.key,
+          status: "PENDING_UPLOAD",
+        },
+      ]);
+
+      await db.insert(uploadSessions).values([
+        {
+          uploadId: upload.id,
+          userId: creatorId,
+          fileKey: audioUpload.key,
+          expiresAt: sessionExpiresAt,
+        },
+      ]);
+
+      return res.status(HTTP_STATUS.OK).json(
+        new ApiResponse(HTTP_STATUS.OK, "Upload initialized", {
+          uploadId: upload.id,
+          contentKind: kind,
+          upload: {
+            audio: {
+              s3UploadId: audioUpload.s3UploadId,
+              key: audioUpload.key,
+            },
+            coverArt: {
+              presignedUrl: coverArt.presignedUrl,
+              fileUrl: coverArt.fileUrl,
+              key: coverArt.key,
+            },
+          },
+        }),
+      );
+    }
+
+    const mainUpload = await initiateVideoMultipart(ctx, "MAIN");
+    const thumbnailUpload = await initiateThumbnailUpload(ctx);
+
+    const assetValues: any[] = [
       {
         uploadId: upload.id,
         assetType: "VIDEO",
         assetRole: "MAIN",
-        fileKey: videoUpload.key,
-        status: "PENDING_UPLOAD",
-      },
-      {
-        uploadId: upload.id,
-        assetType: "VIDEO",
-        assetRole: "TRAILER",
-        fileKey: trailerUpload.key,
+        fileKey: mainUpload.key,
         status: "PENDING_UPLOAD",
       },
       {
@@ -172,34 +392,55 @@ export const createUpload = asyncHandler(
         fileKey: thumbnailUpload.key,
         status: "PENDING_UPLOAD",
       },
-    ]);
+    ];
 
-    // 5. Create upload sessions for multipart uploads
-    const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    await db.insert(uploadSessions).values([
+    const sessionValues: any[] = [
       {
         uploadId: upload.id,
         userId: creatorId,
-        fileKey: videoUpload.key,
+        fileKey: mainUpload.key,
         expiresAt: sessionExpiresAt,
       },
-      {
+    ];
+
+    // Trailer only for MOVIE, SHORT, STANDUP
+    let trailerUpload: { s3UploadId: string | undefined; key: string } | null =
+      null;
+    if (HAS_TRAILER.includes(kind)) {
+      trailerUpload = await initiateVideoMultipart(ctx, "TRAILER");
+      assetValues.push({
+        uploadId: upload.id,
+        assetType: "VIDEO",
+        assetRole: "TRAILER",
+        fileKey: trailerUpload.key,
+        status: "PENDING_UPLOAD",
+      });
+      sessionValues.push({
         uploadId: upload.id,
         userId: creatorId,
         fileKey: trailerUpload.key,
         expiresAt: sessionExpiresAt,
-      },
-    ]);
+      });
+    }
+
+    await db.insert(uploadAssets).values(assetValues);
+    await db.insert(uploadSessions).values(sessionValues);
 
     return res.status(HTTP_STATUS.OK).json(
       new ApiResponse(HTTP_STATUS.OK, "Upload initialized", {
         uploadId: upload.id,
+        contentKind: kind,
         upload: {
-          video: { s3UploadId: videoUpload.s3UploadId, key: videoUpload.key },
-          trailer: {
-            s3UploadId: trailerUpload.s3UploadId,
-            key: trailerUpload.key,
+          video: {
+            s3UploadId: mainUpload.s3UploadId,
+            key: mainUpload.key,
           },
+          ...(trailerUpload && {
+            trailer: {
+              s3UploadId: trailerUpload.s3UploadId,
+              key: trailerUpload.key,
+            },
+          }),
           thumbnail: {
             presignedUrl: thumbnailUpload.presignedUrl,
             fileUrl: thumbnailUpload.fileUrl,
@@ -253,6 +494,8 @@ export const completeMultipartUpload = asyncHandler(
     });
     if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
 
+    const kind = (upload.contentKind ?? "MOVIE") as ContentKind;
+
     // 2. Complete S3 multipart
     await s3.send(
       new CompleteMultipartUploadCommand({
@@ -272,6 +515,9 @@ export const completeMultipartUpload = asyncHandler(
       upload.title,
       upload.type ?? null,
       upload.genreId ?? null,
+      upload.showId ?? null,
+      upload.seasonNumber ?? null,
+      upload.episodeNumber ?? null,
     );
     const processingPrefix = buildProcessingPrefix(
       ctx,
@@ -302,9 +548,11 @@ export const completeMultipartUpload = asyncHandler(
       .set({ status: "IN_REVIEW", updatedAt: new Date() })
       .where(eq(uploads.id, uploadId));
 
+    const jobName = isAudioOnly(kind) ? "convert-audio-hls" : "convert-to-hls";
+
     // 6. Enqueue transcoding job (pass processingPrefix so worker doesn't need to recompute)
     const queueJob = await videoQueue.add(
-      "convert-to-hls",
+      jobName,
       {
         fileUrl,
         uploadId,
@@ -312,6 +560,10 @@ export const completeMultipartUpload = asyncHandler(
         sourceKey: key,
         assetRole,
         processingPrefix,
+        contentKind: kind,
+        showId: upload.showId ?? null,
+        seasonNumber: upload.seasonNumber ?? null,
+        episodeNumber: upload.episodeNumber ?? null,
       },
       {
         jobId: `${uploadId}:${assetRole}:${Date.now()}`,
@@ -325,6 +577,7 @@ export const completeMultipartUpload = asyncHandler(
         jobId: queueJob.id,
         uploadAssetId: updatedAsset.id,
         processingPrefix,
+        contentKind: kind,
       }),
     );
   },
@@ -359,13 +612,11 @@ export const saveThumbnail = asyncHandler(
     if (!updatedAsset)
       throw new ApiError(HTTP_STATUS.NOT_FOUND, "Thumbnail asset not found");
 
-    return res
-      .status(HTTP_STATUS.OK)
-      .json(
-        new ApiResponse(HTTP_STATUS.OK, "Thumbnail saved", {
-          asset: updatedAsset,
-        }),
-      );
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Thumbnail saved", {
+        asset: updatedAsset,
+      }),
+    );
   },
 );
 
@@ -437,7 +688,6 @@ export const deleteUpload = asyncHandler(
     });
     if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
 
-    // Build S3 prefixes and delete both Original + Processing folders
     const ctx = await resolveStorageContext(
       upload.creatorId,
       upload.id,
@@ -455,7 +705,6 @@ export const deleteUpload = asyncHandler(
       ),
     ]);
 
-    // Soft delete
     await db
       .update(uploads)
       .set({ deletedFlg: true, status: "CANCELLED", updatedAt: new Date() })
@@ -501,13 +750,11 @@ export const getUploadById = asyncHandler(
         ),
       );
 
-    return res
-      .status(HTTP_STATUS.OK)
-      .json(
-        new ApiResponse(HTTP_STATUS.OK, "Upload fetched", {
-          upload: { ...upload, assets },
-        }),
-      );
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload fetched", {
+        upload: { ...upload, assets },
+      }),
+    );
   },
 );
 
@@ -517,28 +764,71 @@ export const getAllUploads = asyncHandler(
     if (!creatorId)
       throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
 
+    const { contentKind } = req.query;
+
+    const validKinds = [
+      "MOVIE",
+      "EPISODE",
+      "SHORT",
+      "STANDUP",
+      "PODCAST_EP",
+      "MUSIC_TRACK",
+    ] as const;
+    type ContentKind = (typeof validKinds)[number];
+
+    const filters = [
+      eq(uploads.creatorId, creatorId),
+      eq(uploads.deletedFlg, false),
+    ];
+
+    if (contentKind) {
+      if (!validKinds.includes(contentKind as ContentKind)) {
+        throw new ApiError(
+          HTTP_STATUS.BAD_REQUEST,
+          `Invalid contentKind. Must be one of: ${validKinds.join(", ")}`,
+        );
+      }
+      filters.push(eq(uploads.contentKind, contentKind as ContentKind));
+    }
+
     const uploadRows = await db
       .select()
       .from(uploads)
-      .where(
-        and(eq(uploads.creatorId, creatorId), eq(uploads.deletedFlg, false)),
-      )
+      .where(and(...filters))
       .orderBy(desc(uploads.createdAt));
 
-    const result = await Promise.all(
-      uploadRows.map(async (upload) => {
-        const assets = await db
-          .select()
-          .from(uploadAssets)
-          .where(
-            and(
-              eq(uploadAssets.uploadId, upload.id),
-              eq(uploadAssets.deletedFlg, false),
-            ),
-          );
-        return { ...upload, assets };
-      }),
+    if (uploadRows.length === 0) {
+      return res
+        .status(HTTP_STATUS.OK)
+        .json(
+          new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", { uploads: [] }),
+        );
+    }
+
+    const uploadIds = uploadRows.map((u) => u.id);
+
+    const allAssets = await db
+      .select()
+      .from(uploadAssets)
+      .where(
+        and(
+          inArray(uploadAssets.uploadId, uploadIds),
+          eq(uploadAssets.deletedFlg, false),
+        ),
+      );
+
+    const assetsByUploadId = allAssets.reduce(
+      (acc, asset) => {
+        (acc[asset.uploadId] ??= []).push(asset);
+        return acc;
+      },
+      {} as Record<string, typeof allAssets>,
     );
+
+    const result = uploadRows.map((upload) => ({
+      ...upload,
+      assets: assetsByUploadId[upload.id] ?? [],
+    }));
 
     return res
       .status(HTTP_STATUS.OK)
@@ -547,34 +837,3 @@ export const getAllUploads = asyncHandler(
       );
   },
 );
-
-const deleteFolderByPrefix = async (prefix: string) => {
-  let continuationToken: string | undefined;
-
-  do {
-    const listed = await s3.send(
-      new ListObjectsV2Command({
-        Bucket: S3_CREDENTIAL.S3_BUCKET,
-        Prefix: prefix,
-        ContinuationToken: continuationToken,
-      }),
-    );
-
-    if (listed.Contents?.length) {
-      await s3.send(
-        new DeleteObjectsCommand({
-          Bucket: S3_CREDENTIAL.S3_BUCKET,
-          Delete: {
-            Objects: listed.Contents.map((item) => item.Key)
-              .filter((k): k is string => Boolean(k))
-              .map((k) => ({ Key: k })),
-          },
-        }),
-      );
-    }
-
-    continuationToken = listed.IsTruncated
-      ? listed.NextContinuationToken
-      : undefined;
-  } while (continuationToken);
-};

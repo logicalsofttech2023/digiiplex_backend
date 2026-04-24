@@ -16,8 +16,8 @@ router.post("/logout", authController.logout);
 router.post("/profiles", validate({ body: userValidator.createProfileSchema }), authMiddleware, authController.createProfile);
 router.get("/profiles", authMiddleware, authController.getProfiles);
 
-router.get("/genres", authController.getGenres);
-router.get("/languages", authController.getLanguages);
+router.get("/genres", authMiddleware, authController.getGenres);
+router.get("/languages", authMiddleware, authController.getLanguages);
 
 // ===== FAQS =====
 

@@ -64,6 +64,15 @@ export const assetRoleEnum = pgEnum("upload_asset_role", [
   "SUBTITLE_SRT",
 ]);
 
+export const ContentKindEnum = pgEnum("content_kind", [
+  'MOVIE',
+  'EPISODE',
+  'PODCAST_EP',
+  'MUSIC_TRACK',
+  'SHORT',
+  'STANDUP'
+]);
+
 // ──────────── UPLOADS ────────────
 export const uploads = uploadService.table(
   "uploads",
@@ -95,6 +104,10 @@ export const uploads = uploadService.table(
     deletedFlg: boolean("deleted_flg").default(false),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    showId: uuid("show_id").references(() => shows.id),
+    seasonNumber: integer("season_number"),
+    episodeNumber: integer("episode_number"),
+    contentKind: ContentKindEnum("content_kind"),
   },
   (t) => ({
     creatorIdIdx: index("idx_uploads_creator_id").on(t.creatorId),
@@ -180,6 +193,25 @@ export const uploadSessions = uploadService.table(
     expiresIdx: index("idx_upload_sessions_expires").on(t.expiresAt),
   })
 );
+
+export const shows = uploadService.table("shows", {
+  id: uuid("id")
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
+  creatorId: uuid("creator_id").references(() => Users.id),
+  title: text("title").notNull(),
+  description: text("description"),
+  type: varchar("type", { length: 30 }),
+  genreId: uuid("genre_id"),
+  languageId: uuid("language_id"),
+  defaultLanguage: varchar("default_language", { length: 10 }),
+  totalSeasons: integer("total_seasons").default(1),
+  status: varchar("status", { length: 20 }).default("DRAFT"),
+  metadata: jsonb("metadata").default({}),
+  deletedFlg: boolean("deleted_flg").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
 
 // ──────────── VALIDATION RULES ────────────
 export const validationRules = uploadService.table("validation_rules", {

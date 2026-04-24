@@ -10,6 +10,11 @@ router.post("/media/multipart/signed-url", authMiddleware, uploadController.getM
 router.post("/media/multipart/complete", authMiddleware, uploadController.completeMultipartUpload);
 router.post("/media/thumbnail", authMiddleware, uploadController.saveThumbnail);
 
+// Shows
+router.post("/shows", authMiddleware, uploadController.createShow);
+router.get("/shows", authMiddleware, uploadController.getAllShows);
+router.get("/shows/:id", authMiddleware, uploadController.getShowById);
+
 // ── Fetch ─────────────────────────────────────────────────
 router.get("/media", authMiddleware, uploadController.getAllUploads);
 router.get("/media/:id", authMiddleware, uploadController.getUploadById);
