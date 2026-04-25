@@ -200,8 +200,8 @@ services:
       dockerfile: Dockerfile
     container_name: digiplex_gateway
     restart: always
-    ports:
-      - "8080:8080"
+    # ports:
+    #   - "8080:8080"
     depends_on:
       admin-service:
         condition: service_started
