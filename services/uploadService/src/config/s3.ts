@@ -19,8 +19,18 @@ export const setBucketCors = async () => {
         CORSRules: [
           {
             AllowedHeaders: ["*"],
-            AllowedMethods: ["GET", "PUT"],
-            AllowedOrigins: ["http://localhost:5173"],
+            AllowedMethods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"],
+            AllowedOrigins: [
+              "http://localhost:5173",
+              "http://digiiplex.local",
+              "http://admin.digiiplex.local",
+              "http://superadmin.digiiplex.local",
+              "http://creator.digiiplex.local",
+              "http://digiiplex.com",
+              "http://admin.digiiplex.com",
+              "http://superadmin.digiiplex.com",
+              "http://creator.digiiplex.com"
+            ],
             ExposeHeaders: ["ETag"],
             MaxAgeSeconds: 3000,
           },
