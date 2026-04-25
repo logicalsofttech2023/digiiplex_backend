@@ -34,6 +34,7 @@ export const uploadStatusEnum = pgEnum("upload_status", [
   "REJECTED",
   "CANCELLED",
   "INITIATED",
+  "APPROVED"
 ]);
 
 export const assetStatusEnum = pgEnum("asset_status", [

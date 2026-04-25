@@ -29,6 +29,13 @@
       "when": 1777038803259,
       "tag": "0003_perpetual_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777098835203,
+      "tag": "0004_redundant_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

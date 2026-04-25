@@ -14,19 +14,6 @@ const AUDIO_ONLY_KINDS = ["MUSIC_TRACK"];
 const HAS_TRAILER = ["MOVIE", "SHORT", "STANDUP"];
 const REQUIRES_SHOW = ["EPISODE", "PODCAST_EP", "MUSIC_TRACK"];
 const isAudioOnly = (kind) => AUDIO_ONLY_KINDS.includes(kind);
-const mapListTypeToStatuses = (listType) => {
-    if (!listType || listType === "all")
-        return null;
-    if (listType === "approved" || listType === "published")
-        return ["PUBLISHED"];
-    if (listType === "rejected")
-        return ["REJECTED"];
-    if (listType === "pending_approval")
-        return ["IN_REVIEW"];
-    if (listType === "upload_list")
-        return ["DRAFT", "INITIATED", "READY"];
-    return null;
-};
 const resolveStorageContext = async (creatorId, uploadId, title, type, genreId, showId, seasonNumber, episodeNumber) => {
     const user = await db.query.Users.findFirst({
         where: eq(Users.id, creatorId),
@@ -510,7 +497,7 @@ export const getUploadById = asyncHandler(async (req, res) => {
     }));
 });
 export const getAllUploads = asyncHandler(async (req, res) => {
-    const { contentKind, listType, status } = req.query;
+    const { contentKind, status } = req.query;
     const validKinds = [
         "MOVIE",
         "EPISODE",
@@ -526,11 +513,7 @@ export const getAllUploads = asyncHandler(async (req, res) => {
         }
         filters.push(eq(uploads.contentKind, contentKind));
     }
-    const mappedStatuses = mapListTypeToStatuses(typeof listType === "string" ? listType : undefined);
-    if (mappedStatuses?.length) {
-        filters.push(inArray(uploads.status, mappedStatuses));
-    }
-    else if (typeof status === "string") {
+    if (typeof status === "string") {
         filters.push(eq(uploads.status, status));
     }
     const uploadRows = await db
@@ -556,12 +539,9 @@ export const getAllUploads = asyncHandler(async (req, res) => {
         ...upload,
         assets: assetsByUploadId[upload.id] ?? [],
     }));
-    return res
-        .status(HTTP_STATUS.OK)
-        .json(new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", {
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", {
         uploads: result,
         appliedFilters: {
-            listType: listType ?? "all",
             status: status ?? null,
             contentKind: contentKind ?? null,
         },
@@ -581,8 +561,8 @@ export const submitUploadForReview = asyncHandler(async (req, res) => {
         .select()
         .from(uploadAssets)
         .where(and(eq(uploadAssets.uploadId, uploadId), eq(uploadAssets.deletedFlg, false)));
-    const mainAsset = assets.find((asset) => asset.assetRole === "MAIN");
-    const thumbnailAsset = assets.find((asset) => asset.assetRole === "THUMBNAIL");
+    const mainAsset = assets.find((a) => a.assetRole === "MAIN");
+    const thumbnailAsset = assets.find((a) => a.assetRole === "THUMBNAIL");
     if (!mainAsset?.masterPlaylistUrl) {
         throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Main asset processing is not completed yet");
     }
@@ -591,15 +571,34 @@ export const submitUploadForReview = asyncHandler(async (req, res) => {
     }
     await db
         .update(uploads)
-        .set({
-        status: "IN_REVIEW",
-        errorMessage: null,
-        updatedAt: new Date(),
-    })
+        .set({ status: "IN_REVIEW", errorMessage: null, updatedAt: new Date() })
         .where(eq(uploads.id, uploadId));
     return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload submitted for review", {
         uploadId,
         status: "IN_REVIEW",
+    }));
+});
+export const approveUpload = asyncHandler(async (req, res) => {
+    const uploadId = req.params.id;
+    const upload = await db.query.uploads.findFirst({
+        where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+    });
+    if (!upload)
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+    if (upload.status !== "IN_REVIEW") {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only uploads in review can be approved");
+    }
+    await db
+        .update(uploads)
+        .set({
+        status: "APPROVED",
+        errorMessage: null,
+        updatedAt: new Date(),
+    })
+        .where(eq(uploads.id, uploadId));
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload approved", {
+        uploadId,
+        status: "APPROVED",
     }));
 });
 export const publishUpload = asyncHandler(async (req, res) => {
@@ -609,25 +608,17 @@ export const publishUpload = asyncHandler(async (req, res) => {
     });
     if (!upload)
         throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
-    if (upload.status !== "IN_REVIEW") {
-        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only uploads in review can be published");
+    if (upload.status !== "APPROVED") {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only approved uploads can be published");
     }
     const now = new Date();
     await db
         .update(uploads)
-        .set({
-        status: "PUBLISHED",
-        errorMessage: null,
-        updatedAt: now,
-    })
+        .set({ status: "PUBLISHED", errorMessage: null, updatedAt: now })
         .where(eq(uploads.id, uploadId));
     await db
         .update(videos)
-        .set({
-        status: "PUBLISHED",
-        publishedAt: now,
-        updatedAt: now,
-    })
+        .set({ status: "PUBLISHED", publishedAt: now, updatedAt: now })
         .where(eq(videos.uploadId, uploadId));
     return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload published", {
         uploadId,
@@ -648,22 +639,13 @@ export const rejectUpload = asyncHandler(async (req, res) => {
     if (upload.status !== "IN_REVIEW") {
         throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only uploads in review can be rejected");
     }
-    const now = new Date();
     await db
         .update(uploads)
-        .set({
-        status: "REJECTED",
-        errorMessage: reason,
-        updatedAt: now,
-    })
+        .set({ status: "REJECTED", errorMessage: reason, updatedAt: new Date() })
         .where(eq(uploads.id, uploadId));
     await db
         .update(videos)
-        .set({
-        status: "DRAFT",
-        publishedAt: null,
-        updatedAt: now,
-    })
+        .set({ status: "DRAFT", publishedAt: null, updatedAt: new Date() })
         .where(eq(videos.uploadId, uploadId));
     return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload rejected", {
         uploadId,

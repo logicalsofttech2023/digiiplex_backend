@@ -204,7 +204,7 @@ export const getAdminById = asyncHandler(
     });
 
     if (!admin) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Admin not found");
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Admin Not found");
     }
 
     return res.status(HTTP_STATUS.OK).json(

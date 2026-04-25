@@ -1,5 +1,5 @@
 export declare const uploadService: import("drizzle-orm/pg-core").PgSchema<"upload_service">;
-export declare const uploadStatusEnum: import("drizzle-orm/pg-core").PgEnum<["DRAFT", "IN_REVIEW", "READY", "PUBLISHED", "REJECTED", "CANCELLED", "INITIATED"]>;
+export declare const uploadStatusEnum: import("drizzle-orm/pg-core").PgEnum<["DRAFT", "IN_REVIEW", "READY", "PUBLISHED", "REJECTED", "CANCELLED", "INITIATED", "APPROVED"]>;
 export declare const assetStatusEnum: import("drizzle-orm/pg-core").PgEnum<["PENDING_UPLOAD", "UPLOADED", "PROCESSING", "PENDING_APPROVAL", "APPROVED", "REJECTED"]>;
 export declare const assetTypeEnum: import("drizzle-orm/pg-core").PgEnum<["VIDEO", "AUDIO", "IMAGE", "SUBTITLE", "CAPTION"]>;
 export declare const assetRoleEnum: import("drizzle-orm/pg-core").PgEnum<["MAIN", "TRAILER", "TEASER", "THUMBNAIL", "POSTER", "BACKDROP", "LOGO", "SUBTITLE_VTT", "SUBTITLE_SRT"]>;
@@ -153,14 +153,14 @@ export declare const uploads: import("drizzle-orm/pg-core").PgTableWithColumns<{
             tableName: "uploads";
             dataType: "string";
             columnType: "PgEnumColumn";
-            data: "DRAFT" | "IN_REVIEW" | "READY" | "PUBLISHED" | "REJECTED" | "CANCELLED" | "INITIATED";
+            data: "DRAFT" | "IN_REVIEW" | "READY" | "PUBLISHED" | "REJECTED" | "CANCELLED" | "INITIATED" | "APPROVED";
             driverParam: string;
             notNull: true;
             hasDefault: true;
             isPrimaryKey: false;
             isAutoincrement: false;
             hasRuntimeDefault: false;
-            enumValues: ["DRAFT", "IN_REVIEW", "READY", "PUBLISHED", "REJECTED", "CANCELLED", "INITIATED"];
+            enumValues: ["DRAFT", "IN_REVIEW", "READY", "PUBLISHED", "REJECTED", "CANCELLED", "INITIATED", "APPROVED"];
             baseColumn: never;
             identity: undefined;
             generated: undefined;
@@ -553,7 +553,7 @@ export declare const uploadAssets: import("drizzle-orm/pg-core").PgTableWithColu
             tableName: "upload_assets";
             dataType: "string";
             columnType: "PgEnumColumn";
-            data: "REJECTED" | "PENDING_UPLOAD" | "UPLOADED" | "PROCESSING" | "PENDING_APPROVAL" | "APPROVED";
+            data: "REJECTED" | "APPROVED" | "PENDING_UPLOAD" | "UPLOADED" | "PROCESSING" | "PENDING_APPROVAL";
             driverParam: string;
             notNull: true;
             hasDefault: true;

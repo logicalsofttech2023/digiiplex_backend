@@ -695,6 +695,9 @@ export const deleteUpload = asyncHandler(
       upload.title,
       upload.type ?? null,
       upload.genreId ?? null,
+      upload.showId ?? null, // ✅ add karo
+      upload.seasonNumber ?? null, // ✅ add karo
+      upload.episodeNumber ?? null,
     );
 
     await Promise.all([
@@ -730,16 +733,25 @@ export const deleteUpload = asyncHandler(
 export const getUploadById = asyncHandler(
   async (req: Request, res: Response) => {
     const uploadId = req.params.id;
-    if (!uploadId)
+    const user = (req as any).user;
+    const creatorId = user?.id;
+
+    if (!uploadId) {
       throw new ApiError(HTTP_STATUS.BAD_REQUEST, "uploadId is required");
+    }
+
+    const filters = [
+      eq(uploads.id, uploadId as string),
+      eq(uploads.deletedFlg, false),
+    ];
 
     const upload = await db.query.uploads.findFirst({
-      where: and(
-        eq(uploads.id, uploadId as string),
-        eq(uploads.deletedFlg, false),
-      ),
+      where: and(...filters),
     });
-    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    if (!upload) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+    }
 
     const assets = await db
       .select()
@@ -761,6 +773,7 @@ export const getUploadById = asyncHandler(
 
 export const getAllUploads = asyncHandler(
   async (req: Request, res: Response) => {
+    const creatorId = (req as any).user?.id;
     const { contentKind, status } = req.query;
 
     const validKinds = [
@@ -773,7 +786,10 @@ export const getAllUploads = asyncHandler(
     ] as const;
     type ContentKind = (typeof validKinds)[number];
 
-    const filters = [eq(uploads.deletedFlg, false)];
+    const filters = [
+      eq(uploads.deletedFlg, false),
+      eq(uploads.creatorId, creatorId),
+    ];
 
     if (contentKind) {
       if (!validKinds.includes(contentKind as ContentKind)) {
@@ -786,7 +802,11 @@ export const getAllUploads = asyncHandler(
     }
 
     if (typeof status === "string") {
-      filters.push(eq(uploads.status, status as any));
+      if (status === "READY") {
+        filters.push(inArray(uploads.status, ["READY", "INITIATED"]));
+      } else {
+        filters.push(eq(uploads.status, status as any));
+      }
     }
 
     const uploadRows = await db
@@ -828,29 +848,28 @@ export const getAllUploads = asyncHandler(
       assets: assetsByUploadId[upload.id] ?? [],
     }));
 
-    return res
-      .status(HTTP_STATUS.OK)
-      .json(new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", {
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", {
         uploads: result,
         appliedFilters: {
           status: status ?? null,
           contentKind: contentKind ?? null,
         },
-      }));
+      }),
+    );
   },
 );
 
 export const submitUploadForReview = asyncHandler(
   async (req: Request, res: Response) => {
-    const uploadId = req.params.id as string;
+    const uploadId = req.params.id;
 
     const upload = await db.query.uploads.findFirst({
       where: and(
-        eq(uploads.id, uploadId),
+        eq(uploads.id, uploadId as string),
         eq(uploads.deletedFlg, false),
       ),
     });
-
     if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
 
     if (upload.status !== "READY") {
@@ -865,13 +884,13 @@ export const submitUploadForReview = asyncHandler(
       .from(uploadAssets)
       .where(
         and(
-          eq(uploadAssets.uploadId, uploadId),
+          eq(uploadAssets.uploadId, uploadId as string),
           eq(uploadAssets.deletedFlg, false),
         ),
       );
 
-    const mainAsset = assets.find((asset) => asset.assetRole === "MAIN");
-    const thumbnailAsset = assets.find((asset) => asset.assetRole === "THUMBNAIL");
+    const mainAsset = assets.find((a) => a.assetRole === "MAIN");
+    const thumbnailAsset = assets.find((a) => a.assetRole === "THUMBNAIL");
 
     if (!mainAsset?.masterPlaylistUrl) {
       throw new ApiError(
@@ -889,12 +908,8 @@ export const submitUploadForReview = asyncHandler(
 
     await db
       .update(uploads)
-      .set({
-        status: "IN_REVIEW",
-        errorMessage: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(uploads.id, uploadId));
+      .set({ status: "IN_REVIEW", errorMessage: null, updatedAt: new Date() })
+      .where(eq(uploads.id, uploadId as string));
 
     return res.status(HTTP_STATUS.OK).json(
       new ApiResponse(HTTP_STATUS.OK, "Upload submitted for review", {
@@ -905,19 +920,59 @@ export const submitUploadForReview = asyncHandler(
   },
 );
 
-export const publishUpload = asyncHandler(
+export const approveUpload = asyncHandler(
   async (req: Request, res: Response) => {
-    const uploadId = req.params.id as string;
+    const uploadId = req.params.id;
 
     const upload = await db.query.uploads.findFirst({
-      where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+      where: and(
+        eq(uploads.id, uploadId as string),
+        eq(uploads.deletedFlg, false),
+      ),
     });
     if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
 
     if (upload.status !== "IN_REVIEW") {
       throw new ApiError(
         HTTP_STATUS.BAD_REQUEST,
-        "Only uploads in review can be published",
+        "Only uploads in review can be approved",
+      );
+    }
+
+    await db
+      .update(uploads)
+      .set({
+        status: "APPROVED" as any,
+        errorMessage: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(uploads.id, uploadId as string));
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload approved", {
+        uploadId,
+        status: "APPROVED",
+      }),
+    );
+  },
+);
+
+export const publishUpload = asyncHandler(
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.id;
+
+    const upload = await db.query.uploads.findFirst({
+      where: and(
+        eq(uploads.id, uploadId as string),
+        eq(uploads.deletedFlg, false),
+      ),
+    });
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    if (upload.status !== "APPROVED") {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Only approved uploads can be published",
       );
     }
 
@@ -925,21 +980,13 @@ export const publishUpload = asyncHandler(
 
     await db
       .update(uploads)
-      .set({
-        status: "PUBLISHED" as any,
-        errorMessage: null,
-        updatedAt: now,
-      })
-      .where(eq(uploads.id, uploadId));
+      .set({ status: "PUBLISHED" as any, errorMessage: null, updatedAt: now })
+      .where(eq(uploads.id, uploadId as string));
 
     await db
       .update(videos)
-      .set({
-        status: "PUBLISHED",
-        publishedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(videos.uploadId, uploadId));
+      .set({ status: "PUBLISHED", publishedAt: now, updatedAt: now })
+      .where(eq(videos.uploadId, uploadId as string));
 
     return res.status(HTTP_STATUS.OK).json(
       new ApiResponse(HTTP_STATUS.OK, "Upload published", {
@@ -953,14 +1000,17 @@ export const publishUpload = asyncHandler(
 
 export const rejectUpload = asyncHandler(
   async (req: Request, res: Response) => {
-    const uploadId = req.params.id as string;
+    const uploadId = req.params.id;
     const reason =
       typeof req.body?.reason === "string" && req.body.reason.trim()
         ? req.body.reason.trim()
         : "Rejected by admin";
 
     const upload = await db.query.uploads.findFirst({
-      where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+      where: and(
+        eq(uploads.id, uploadId as string),
+        eq(uploads.deletedFlg, false),
+      ),
     });
     if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
 
@@ -971,25 +1021,15 @@ export const rejectUpload = asyncHandler(
       );
     }
 
-    const now = new Date();
-
     await db
       .update(uploads)
-      .set({
-        status: "REJECTED",
-        errorMessage: reason,
-        updatedAt: now,
-      })
-      .where(eq(uploads.id, uploadId));
+      .set({ status: "REJECTED", errorMessage: reason, updatedAt: new Date() })
+      .where(eq(uploads.id, uploadId as string));
 
     await db
       .update(videos)
-      .set({
-        status: "DRAFT",
-        publishedAt: null,
-        updatedAt: now,
-      })
-      .where(eq(videos.uploadId, uploadId));
+      .set({ status: "DRAFT", publishedAt: null, updatedAt: new Date() })
+      .where(eq(videos.uploadId, uploadId as string));
 
     return res.status(HTTP_STATUS.OK).json(
       new ApiResponse(HTTP_STATUS.OK, "Upload rejected", {
