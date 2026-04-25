@@ -30,6 +30,7 @@ export const uploadStatusEnum = pgEnum("upload_status", [
   "DRAFT",
   "IN_REVIEW",
   "READY",
+  "PUBLISHED",
   "REJECTED",
   "CANCELLED",
   "INITIATED",

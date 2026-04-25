@@ -33,6 +33,7 @@ import {
   genres,
   Users,
   shows,
+  videos,
 } from "@digiiplex6112/db";
 
 type ContentKind =
@@ -545,7 +546,7 @@ export const completeMultipartUpload = asyncHandler(
     // 5. Update upload → IN_REVIEW
     await db
       .update(uploads)
-      .set({ status: "IN_REVIEW", updatedAt: new Date() })
+      .set({ updatedAt: new Date() })
       .where(eq(uploads.id, uploadId));
 
     const jobName = isAudioOnly(kind) ? "convert-audio-hls" : "convert-to-hls";
@@ -760,11 +761,7 @@ export const getUploadById = asyncHandler(
 
 export const getAllUploads = asyncHandler(
   async (req: Request, res: Response) => {
-    const creatorId = (req as any).user?.id;
-    if (!creatorId)
-      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
-
-    const { contentKind } = req.query;
+    const { contentKind, status } = req.query;
 
     const validKinds = [
       "MOVIE",
@@ -776,10 +773,7 @@ export const getAllUploads = asyncHandler(
     ] as const;
     type ContentKind = (typeof validKinds)[number];
 
-    const filters = [
-      eq(uploads.creatorId, creatorId),
-      eq(uploads.deletedFlg, false),
-    ];
+    const filters = [eq(uploads.deletedFlg, false)];
 
     if (contentKind) {
       if (!validKinds.includes(contentKind as ContentKind)) {
@@ -789,6 +783,10 @@ export const getAllUploads = asyncHandler(
         );
       }
       filters.push(eq(uploads.contentKind, contentKind as ContentKind));
+    }
+
+    if (typeof status === "string") {
+      filters.push(eq(uploads.status, status as any));
     }
 
     const uploadRows = await db
@@ -832,8 +830,173 @@ export const getAllUploads = asyncHandler(
 
     return res
       .status(HTTP_STATUS.OK)
-      .json(
-        new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", { uploads: result }),
+      .json(new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", {
+        uploads: result,
+        appliedFilters: {
+          status: status ?? null,
+          contentKind: contentKind ?? null,
+        },
+      }));
+  },
+);
+
+export const submitUploadForReview = asyncHandler(
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.id as string;
+
+    const upload = await db.query.uploads.findFirst({
+      where: and(
+        eq(uploads.id, uploadId),
+        eq(uploads.deletedFlg, false),
+      ),
+    });
+
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    if (upload.status !== "READY") {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Only READY uploads can be submitted for review",
       );
+    }
+
+    const assets = await db
+      .select()
+      .from(uploadAssets)
+      .where(
+        and(
+          eq(uploadAssets.uploadId, uploadId),
+          eq(uploadAssets.deletedFlg, false),
+        ),
+      );
+
+    const mainAsset = assets.find((asset) => asset.assetRole === "MAIN");
+    const thumbnailAsset = assets.find((asset) => asset.assetRole === "THUMBNAIL");
+
+    if (!mainAsset?.masterPlaylistUrl) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Main asset processing is not completed yet",
+      );
+    }
+
+    if (!thumbnailAsset?.masterPlaylistUrl) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Thumbnail is required before sending for review",
+      );
+    }
+
+    await db
+      .update(uploads)
+      .set({
+        status: "IN_REVIEW",
+        errorMessage: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(uploads.id, uploadId));
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload submitted for review", {
+        uploadId,
+        status: "IN_REVIEW",
+      }),
+    );
+  },
+);
+
+export const publishUpload = asyncHandler(
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.id as string;
+
+    const upload = await db.query.uploads.findFirst({
+      where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+    });
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    if (upload.status !== "IN_REVIEW") {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Only uploads in review can be published",
+      );
+    }
+
+    const now = new Date();
+
+    await db
+      .update(uploads)
+      .set({
+        status: "PUBLISHED" as any,
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(uploads.id, uploadId));
+
+    await db
+      .update(videos)
+      .set({
+        status: "PUBLISHED",
+        publishedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(videos.uploadId, uploadId));
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload published", {
+        uploadId,
+        status: "PUBLISHED",
+        publishedAt: now,
+      }),
+    );
+  },
+);
+
+export const rejectUpload = asyncHandler(
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.id as string;
+    const reason =
+      typeof req.body?.reason === "string" && req.body.reason.trim()
+        ? req.body.reason.trim()
+        : "Rejected by admin";
+
+    const upload = await db.query.uploads.findFirst({
+      where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+    });
+    if (!upload) throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+
+    if (upload.status !== "IN_REVIEW") {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Only uploads in review can be rejected",
+      );
+    }
+
+    const now = new Date();
+
+    await db
+      .update(uploads)
+      .set({
+        status: "REJECTED",
+        errorMessage: reason,
+        updatedAt: now,
+      })
+      .where(eq(uploads.id, uploadId));
+
+    await db
+      .update(videos)
+      .set({
+        status: "DRAFT",
+        publishedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(videos.uploadId, uploadId));
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(HTTP_STATUS.OK, "Upload rejected", {
+        uploadId,
+        status: "REJECTED",
+        reason,
+      }),
+    );
   },
 );

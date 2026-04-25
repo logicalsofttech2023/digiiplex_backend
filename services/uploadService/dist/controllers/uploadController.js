@@ -9,11 +9,24 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { buildS3FileUrl, buildCdnFileUrl, buildOriginalVideoKey, buildOriginalAudioKey, buildOriginalThumbnailKey, buildProcessingPrefix, } from "../utils/storagePath.js";
-import { db, uploads, uploadAssets, uploadSessions, genres, Users, shows, } from "@digiiplex6112/db";
+import { db, uploads, uploadAssets, uploadSessions, genres, Users, shows, videos, } from "@digiiplex6112/db";
 const AUDIO_ONLY_KINDS = ["MUSIC_TRACK"];
 const HAS_TRAILER = ["MOVIE", "SHORT", "STANDUP"];
 const REQUIRES_SHOW = ["EPISODE", "PODCAST_EP", "MUSIC_TRACK"];
 const isAudioOnly = (kind) => AUDIO_ONLY_KINDS.includes(kind);
+const mapListTypeToStatuses = (listType) => {
+    if (!listType || listType === "all")
+        return null;
+    if (listType === "approved" || listType === "published")
+        return ["PUBLISHED"];
+    if (listType === "rejected")
+        return ["REJECTED"];
+    if (listType === "pending_approval")
+        return ["IN_REVIEW"];
+    if (listType === "upload_list")
+        return ["DRAFT", "INITIATED", "READY"];
+    return null;
+};
 const resolveStorageContext = async (creatorId, uploadId, title, type, genreId, showId, seasonNumber, episodeNumber) => {
     const user = await db.query.Users.findFirst({
         where: eq(Users.id, creatorId),
@@ -370,7 +383,7 @@ export const completeMultipartUpload = asyncHandler(async (req, res) => {
     // 5. Update upload → IN_REVIEW
     await db
         .update(uploads)
-        .set({ status: "IN_REVIEW", updatedAt: new Date() })
+        .set({ updatedAt: new Date() })
         .where(eq(uploads.id, uploadId));
     const jobName = isAudioOnly(kind) ? "convert-audio-hls" : "convert-to-hls";
     // 6. Enqueue transcoding job (pass processingPrefix so worker doesn't need to recompute)
@@ -497,10 +510,7 @@ export const getUploadById = asyncHandler(async (req, res) => {
     }));
 });
 export const getAllUploads = asyncHandler(async (req, res) => {
-    const creatorId = req.user?.id;
-    if (!creatorId)
-        throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Unauthorized");
-    const { contentKind } = req.query;
+    const { contentKind, listType, status } = req.query;
     const validKinds = [
         "MOVIE",
         "EPISODE",
@@ -509,15 +519,19 @@ export const getAllUploads = asyncHandler(async (req, res) => {
         "PODCAST_EP",
         "MUSIC_TRACK",
     ];
-    const filters = [
-        eq(uploads.creatorId, creatorId),
-        eq(uploads.deletedFlg, false),
-    ];
+    const filters = [eq(uploads.deletedFlg, false)];
     if (contentKind) {
         if (!validKinds.includes(contentKind)) {
             throw new ApiError(HTTP_STATUS.BAD_REQUEST, `Invalid contentKind. Must be one of: ${validKinds.join(", ")}`);
         }
         filters.push(eq(uploads.contentKind, contentKind));
+    }
+    const mappedStatuses = mapListTypeToStatuses(typeof listType === "string" ? listType : undefined);
+    if (mappedStatuses?.length) {
+        filters.push(inArray(uploads.status, mappedStatuses));
+    }
+    else if (typeof status === "string") {
+        filters.push(eq(uploads.status, status));
     }
     const uploadRows = await db
         .select()
@@ -544,6 +558,117 @@ export const getAllUploads = asyncHandler(async (req, res) => {
     }));
     return res
         .status(HTTP_STATUS.OK)
-        .json(new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", { uploads: result }));
+        .json(new ApiResponse(HTTP_STATUS.OK, "Uploads fetched", {
+        uploads: result,
+        appliedFilters: {
+            listType: listType ?? "all",
+            status: status ?? null,
+            contentKind: contentKind ?? null,
+        },
+    }));
+});
+export const submitUploadForReview = asyncHandler(async (req, res) => {
+    const uploadId = req.params.id;
+    const upload = await db.query.uploads.findFirst({
+        where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+    });
+    if (!upload)
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+    if (upload.status !== "READY") {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only READY uploads can be submitted for review");
+    }
+    const assets = await db
+        .select()
+        .from(uploadAssets)
+        .where(and(eq(uploadAssets.uploadId, uploadId), eq(uploadAssets.deletedFlg, false)));
+    const mainAsset = assets.find((asset) => asset.assetRole === "MAIN");
+    const thumbnailAsset = assets.find((asset) => asset.assetRole === "THUMBNAIL");
+    if (!mainAsset?.masterPlaylistUrl) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Main asset processing is not completed yet");
+    }
+    if (!thumbnailAsset?.masterPlaylistUrl) {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Thumbnail is required before sending for review");
+    }
+    await db
+        .update(uploads)
+        .set({
+        status: "IN_REVIEW",
+        errorMessage: null,
+        updatedAt: new Date(),
+    })
+        .where(eq(uploads.id, uploadId));
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload submitted for review", {
+        uploadId,
+        status: "IN_REVIEW",
+    }));
+});
+export const publishUpload = asyncHandler(async (req, res) => {
+    const uploadId = req.params.id;
+    const upload = await db.query.uploads.findFirst({
+        where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+    });
+    if (!upload)
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+    if (upload.status !== "IN_REVIEW") {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only uploads in review can be published");
+    }
+    const now = new Date();
+    await db
+        .update(uploads)
+        .set({
+        status: "PUBLISHED",
+        errorMessage: null,
+        updatedAt: now,
+    })
+        .where(eq(uploads.id, uploadId));
+    await db
+        .update(videos)
+        .set({
+        status: "PUBLISHED",
+        publishedAt: now,
+        updatedAt: now,
+    })
+        .where(eq(videos.uploadId, uploadId));
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload published", {
+        uploadId,
+        status: "PUBLISHED",
+        publishedAt: now,
+    }));
+});
+export const rejectUpload = asyncHandler(async (req, res) => {
+    const uploadId = req.params.id;
+    const reason = typeof req.body?.reason === "string" && req.body.reason.trim()
+        ? req.body.reason.trim()
+        : "Rejected by admin";
+    const upload = await db.query.uploads.findFirst({
+        where: and(eq(uploads.id, uploadId), eq(uploads.deletedFlg, false)),
+    });
+    if (!upload)
+        throw new ApiError(HTTP_STATUS.NOT_FOUND, "Upload not found");
+    if (upload.status !== "IN_REVIEW") {
+        throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Only uploads in review can be rejected");
+    }
+    const now = new Date();
+    await db
+        .update(uploads)
+        .set({
+        status: "REJECTED",
+        errorMessage: reason,
+        updatedAt: now,
+    })
+        .where(eq(uploads.id, uploadId));
+    await db
+        .update(videos)
+        .set({
+        status: "DRAFT",
+        publishedAt: null,
+        updatedAt: now,
+    })
+        .where(eq(videos.uploadId, uploadId));
+    return res.status(HTTP_STATUS.OK).json(new ApiResponse(HTTP_STATUS.OK, "Upload rejected", {
+        uploadId,
+        status: "REJECTED",
+        reason,
+    }));
 });
 //# sourceMappingURL=uploadController.js.map

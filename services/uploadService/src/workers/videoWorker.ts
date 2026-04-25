@@ -609,7 +609,11 @@ const worker = new Worker(
       // ── 6. Update uploadAsset → APPROVED ──────────────────────
       await db
         .update(uploadAssets)
-        .set({ status: "APPROVED", masterPlaylistUrl, updatedAt: new Date() })
+        .set({
+          status: "PENDING_APPROVAL",
+          masterPlaylistUrl,
+          updatedAt: new Date(),
+        })
         .where(eq(uploadAssets.id, uploadAssetId));
 
       // ── 7. Create streaming records ───────────────────────────
@@ -637,37 +641,90 @@ const worker = new Worker(
           .limit(1)
           .then((res) => res[0]);
 
-        // Create video record
-        const [video] = await db
-          .insert(videos)
-          .values({
-            uploadId,
-            title: uploadRecord.title,
-            description: uploadRecord.description ?? null,
-            status: "DRAFT",
-            maturityRating: (uploadRecord.metadata as any)?.ageRating ?? null,
-            genres: (uploadRecord.metadata as any)?.genres ?? [],
-            tags: (uploadRecord.metadata as any)?.tags ?? [],
-            cast: (uploadRecord.metadata as any)?.cast ?? [],
-          })
-          .returning();
+        let video = await db
+          .select()
+          .from(videos)
+          .where(eq(videos.uploadId, uploadId))
+          .limit(1)
+          .then((res) => res[0] ?? null);
 
-        console.log("Video record created:", video.id);
+        if (video) {
+          const [updatedVideo] = await db
+            .update(videos)
+            .set({
+              title: uploadRecord.title,
+              description: uploadRecord.description ?? null,
+              maturityRating: (uploadRecord.metadata as any)?.ageRating ?? null,
+              genres: (uploadRecord.metadata as any)?.genres ?? [],
+              tags: (uploadRecord.metadata as any)?.tags ?? [],
+              cast: (uploadRecord.metadata as any)?.cast ?? [],
+              updatedAt: new Date(),
+            })
+            .where(eq(videos.id, video.id))
+            .returning();
 
-        // Create videoAsset record
-        await db.insert(videoAssets).values({
-          videoId: video.id,
-          uploadAssetId,
-          // MUSIC_TRACK has no video so use MAIN for audio asset type too
-          assetType: "MAIN",
-          streamingProtocol: "HLS",
-          masterPlaylistUrl,
-          thumbnailUrl: thumbnailAsset?.masterPlaylistUrl ?? null,
-          drmEnabled: false,
-          availableQualities: isMusic
-            ? (usedRenditions as typeof audioRenditions).map((r) => r.label)
-            : (usedRenditions as typeof videoRenditions).map((r) => r.label),
-        });
+          video = updatedVideo;
+          console.log("Video record updated:", video.id);
+        } else {
+          [video] = await db
+            .insert(videos)
+            .values({
+              uploadId,
+              title: uploadRecord.title,
+              description: uploadRecord.description ?? null,
+              status: "DRAFT",
+              maturityRating: (uploadRecord.metadata as any)?.ageRating ?? null,
+              genres: (uploadRecord.metadata as any)?.genres ?? [],
+              tags: (uploadRecord.metadata as any)?.tags ?? [],
+              cast: (uploadRecord.metadata as any)?.cast ?? [],
+            })
+            .returning();
+
+          console.log("Video record created:", video.id);
+        }
+
+        const existingMainAsset = await db
+          .select()
+          .from(videoAssets)
+          .where(
+            and(
+              eq(videoAssets.videoId, video.id),
+              eq(videoAssets.assetType, "MAIN"),
+            ),
+          )
+          .limit(1)
+          .then((res) => res[0] ?? null);
+
+        if (existingMainAsset) {
+          await db
+            .update(videoAssets)
+            .set({
+              uploadAssetId,
+              streamingProtocol: "HLS",
+              masterPlaylistUrl,
+              thumbnailUrl: thumbnailAsset?.masterPlaylistUrl ?? null,
+              drmEnabled: false,
+              availableQualities: isMusic
+                ? (usedRenditions as typeof audioRenditions).map((r) => r.label)
+                : (usedRenditions as typeof videoRenditions).map((r) => r.label),
+              updatedAt: new Date(),
+            })
+            .where(eq(videoAssets.id, existingMainAsset.id));
+        } else {
+          await db.insert(videoAssets).values({
+            videoId: video.id,
+            uploadAssetId,
+            // MUSIC_TRACK has no video so use MAIN for audio asset type too
+            assetType: "MAIN",
+            streamingProtocol: "HLS",
+            masterPlaylistUrl,
+            thumbnailUrl: thumbnailAsset?.masterPlaylistUrl ?? null,
+            drmEnabled: false,
+            availableQualities: isMusic
+              ? (usedRenditions as typeof audioRenditions).map((r) => r.label)
+              : (usedRenditions as typeof videoRenditions).map((r) => r.label),
+          });
+        }
 
         console.log("Main videoAsset created");
       } else if (assetRole === "TRAILER") {

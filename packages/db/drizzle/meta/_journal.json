@@ -22,6 +22,13 @@
       "when": 1776925257414,
       "tag": "0002_hard_screwball",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777038803259,
+      "tag": "0003_perpetual_hydra",
+      "breakpoints": true
     }
   ]
 }

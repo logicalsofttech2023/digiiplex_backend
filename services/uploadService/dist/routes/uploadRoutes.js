@@ -7,6 +7,9 @@ router.post("/media", authMiddleware, uploadController.createUpload);
 router.post("/media/multipart/signed-url", authMiddleware, uploadController.getMultipartSignedUrl);
 router.post("/media/multipart/complete", authMiddleware, uploadController.completeMultipartUpload);
 router.post("/media/thumbnail", authMiddleware, uploadController.saveThumbnail);
+router.patch("/media/:id/submit-review", authMiddleware, uploadController.submitUploadForReview);
+router.patch("/media/:id/publish", authMiddleware, uploadController.publishUpload);
+router.patch("/media/:id/reject", authMiddleware, uploadController.rejectUpload);
 // Shows
 router.post("/shows", authMiddleware, uploadController.createShow);
 router.get("/shows", authMiddleware, uploadController.getAllShows);
